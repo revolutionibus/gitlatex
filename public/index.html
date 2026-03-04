@@ -80,6 +80,14 @@
           </button>
         </div>
       </div>
+      <div class="settings-group settings-group-stack">
+        <label class="settings-label" for="settings-compiler-api">Compiler API (pdflatex)</label>
+        <p class="settings-hint">Leave empty to use local pdflatex. Or set a URL to an API that compiles LaTeX and returns a PDF.</p>
+        <input type="url" id="settings-compiler-api" class="settings-input" placeholder="https://your-pdflatex-api.example.com/compile" autocomplete="url">
+        <label class="settings-label" for="settings-compiler-api-key">API key</label>
+        <p class="settings-hint">Optional. Sent as <code>Authorization: Bearer &lt;key&gt;</code> when calling the compiler API.</p>
+        <input type="password" id="settings-compiler-api-key" class="settings-input" placeholder="Your API key" autocomplete="off">
+      </div>
     </section>
   </main>
 </div>
@@ -97,8 +105,10 @@
       <span id="editor-repo-name" class="repo-name"></span>
     </div>
     <div class="toolbar-right">
-      <button type="button" onclick="saveCurrentFile()">Save</button>
-      <button type="button" class="primary" onclick="compile()">Compile</button>
+      <button type="button" class="primary" id="btn-compile" onclick="compile()">
+          <span class="material-icons btn-compile-icon" aria-hidden="true">build</span>
+          <span class="btn-compile-text">Compile</span>
+        </button>
       <button type="button" onclick="showCompileErrors()">Errors</button>
       <button type="button" onclick="showStatus()">Status</button>
       <button type="button" onclick="showDiff()">Diff</button>
@@ -124,7 +134,13 @@
       <div id="sidebar-tree"></div>
     </div>
     <div class="resizer resizer-v" id="resizer-sidebar" title="Resize sidebar"></div>
-    <div id="editor"></div>
+    <div id="editor-pane">
+      <div id="editor"></div>
+      <div id="file-viewer" class="hidden" aria-hidden="true">
+        <img id="file-viewer-img" alt="" class="file-viewer-content">
+        <iframe id="file-viewer-pdf" class="file-viewer-content hidden" title="PDF viewer"></iframe>
+      </div>
+    </div>
     <div class="resizer resizer-v" id="resizer-pdf" title="Resize editor / PDF"></div>
     <iframe id="pdf"></iframe>
   </div>

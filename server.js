@@ -10,6 +10,18 @@ app.use(bodyParser.json());
 
 const BASE_DIR = path.join(__dirname, "repos");
 
+const MIME_TYPES = {
+  ".pdf": "application/pdf",
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+  ".svg": "image/svg+xml",
+  ".bmp": "image/bmp",
+  ".ico": "image/x-icon"
+};
+
 if (!fs.existsSync(BASE_DIR)) {
   fs.mkdirSync(BASE_DIR);
 }
@@ -164,6 +176,10 @@ app.get("/file", (req, res) => {
     return res.status(400).json({ error: "No repository selected" });
   }
   const filePath = path.join(currentRepoPath, req.query.path);
+  const ext = path.extname(filePath).toLowerCase();
+  if (MIME_TYPES[ext]) {
+    return res.status(415).json({ error: "Use file-raw for binary/viewable files" });
+  }
   const content = fs.readFileSync(filePath, "utf8");
   res.json({ content });
 });
@@ -182,13 +198,38 @@ app.post("/save", (req, res) => {
 
 /* Resolve path inside repo and ensure it stays within currentRepoPath */
 function resolveRepoPath(relativePath) {
-  if (!currentRepoPath) return null;
-  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+  if (!currentRepoPath || relativePath == null || typeof relativePath !== "string") return null;
+  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "").replace(/^[/\\]+/, "");
+  if (!normalized) return null;
   const full = path.resolve(currentRepoPath, normalized);
   const rel = path.relative(currentRepoPath, full);
   if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
   return full;
 }
+
+/* Serve raw file (for images, PDF viewer) - use same path join as /file then ensure under repo */
+app.get("/file-raw", (req, res) => {
+  if (!currentRepoPath) return res.status(400).send("No repository selected");
+  const rawPath = (req.query.path || "").trim().replace(/^[/\\]+/, "");
+  if (!rawPath) return res.status(400).send("Missing path");
+  const fullPath = path.resolve(path.join(currentRepoPath, rawPath));
+  const repoRoot = path.resolve(currentRepoPath);
+  if (fullPath !== repoRoot && !fullPath.startsWith(repoRoot + path.sep)) {
+    return res.status(404).send("File not found");
+  }
+  try {
+    if (!fs.existsSync(fullPath)) return res.status(404).send("File not found");
+    if (!fs.statSync(fullPath).isFile()) return res.status(404).send("Not a file");
+  } catch (err) {
+    return res.status(404).send("File not found");
+  }
+  const ext = path.extname(fullPath).toLowerCase();
+  const mime = MIME_TYPES[ext];
+  if (mime) res.type(mime);
+  res.sendFile(fullPath, (err) => {
+    if (err && !res.headersSent) res.status(500).send("Error sending file");
+  });
+});
 
 /* ---------------------------
    Create new file

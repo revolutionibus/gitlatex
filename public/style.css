@@ -15,9 +15,9 @@
   --text-secondary: #8b949e;
   --text-muted: #6e7681;
 
-  --accent: #58a6ff;
-  --accent-hover: #79b8ff;
-  --accent-muted: rgba(88, 166, 255, 0.15);
+  --accent: #008080;
+  --accent-hover: #F1502F;
+  --accent-muted: rgba(0, 128, 128, 0.15);
 
   --success: #3fb950;
   --console-text: #7ee787;
@@ -51,9 +51,9 @@
   --text-secondary: #656d76;
   --text-muted: #8c959f;
 
-  --accent: #0969da;
-  --accent-hover: #0550ae;
-  --accent-muted: rgba(9, 105, 218, 0.12);
+  --accent: #008080;
+  --accent-hover: #F1502F;
+  --accent-muted: rgba(0, 128, 128, 0.12);
 
   --success: #1a7f37;
   --console-text: #2ea04e;
@@ -236,6 +236,8 @@ body.sidebar-hidden #toggleSidebarBtn {
 }
 
 #topbar button.primary {
+  display: inline-flex;
+  align-items: center;
   background: var(--accent);
   border-color: var(--accent);
   color: #fff;
@@ -244,6 +246,23 @@ body.sidebar-hidden #toggleSidebarBtn {
 #topbar button.primary:hover {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
+}
+
+#topbar button.primary .btn-compile-icon {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+}
+#topbar button.primary.loading {
+  pointer-events: none;
+  opacity: 0.85;
+}
+#topbar button.primary.loading .btn-compile-icon {
+  animation: compile-spin 0.8s linear infinite;
+}
+@keyframes compile-spin {
+  to { transform: rotate(360deg); }
 }
 
 /* --- Resizers --- */
@@ -470,8 +489,8 @@ body.sidebar-hidden #toggleSidebarBtn {
   margin-top: 8px;
 }
 
-/* --- Editor pane --- */
-#editor {
+/* --- Editor pane (contains editor and file viewer) --- */
+#editor-pane {
   flex: 1 1 0;
   min-width: 180px;
   min-height: 0;
@@ -479,6 +498,47 @@ body.sidebar-hidden #toggleSidebarBtn {
   border-right: 1px solid var(--border-subtle);
   position: relative;
   overflow: hidden;
+}
+
+#editor {
+  position: absolute;
+  inset: 0;
+  min-height: 0;
+}
+
+#editor-pane.viewer-active #editor {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+#file-viewer {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-app);
+  overflow: auto;
+}
+
+#file-viewer.hidden {
+  display: none !important;
+}
+
+.file-viewer-content {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+#file-viewer-pdf.file-viewer-content {
+  width: 100%;
+  height: 100%;
+  border: none;
+}
+
+#file-viewer-pdf.hidden {
+  display: none !important;
 }
 
 /* Monaco fills the pane; absolute so it stays within #editor below the navbar */
@@ -509,7 +569,7 @@ body.sidebar-hidden #toggleSidebarBtn {
   border-right-color: transparent;
 }
 
-.sidebar-hidden #editor {
+.sidebar-hidden #editor-pane {
   flex: 1;
 }
 
@@ -1021,6 +1081,7 @@ body.sidebar-hidden #toggleSidebarBtn {
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
   padding: 20px 24px;
+  margin-bottom: 16px;
 }
 
 .settings-label {
@@ -1028,6 +1089,46 @@ body.sidebar-hidden #toggleSidebarBtn {
   font-weight: 600;
   color: var(--text-secondary);
   flex-shrink: 0;
+}
+
+.settings-group-stack {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+}
+.settings-group-stack .settings-label {
+  margin-bottom: 0;
+}
+.settings-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 0;
+  line-height: 1.4;
+}
+.settings-hint code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 1px 4px;
+  background: var(--bg-hover);
+  border-radius: 3px;
+}
+.settings-input {
+  width: 100%;
+  padding: 10px 12px;
+  font-family: var(--font-sans);
+  font-size: 13px;
+  color: var(--text-primary);
+  background: var(--bg-app);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  box-sizing: border-box;
+}
+.settings-input::placeholder {
+  color: var(--text-muted);
+}
+.settings-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .theme-options {

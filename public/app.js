@@ -1,4 +1,7 @@
 const THEME_KEY = "gitlatex-theme";
+// localStorage keys for user settings (Compiler API URL and optional API key)
+const STORAGE_COMPILER_API_URL = "gitlatex-compiler-api";
+const STORAGE_COMPILER_API_KEY = "gitlatex-compiler-api-key";
 
 /** API base URL: same origin, or http://localhost:3000 when on file:// or when on another port (e.g. dev server on 5173). */
 function getApiBase() {
@@ -9,6 +12,44 @@ function getApiBase() {
   return "";
 }
 const API_BASE = getApiBase();
+
+const VIEWABLE_EXTENSIONS = [".pdf", ".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg", ".bmp", ".ico"];
+function isViewableFile(path) {
+  if (!path) return false;
+  return VIEWABLE_EXTENSIONS.some(ext => path.toLowerCase().endsWith(ext));
+}
+
+function showEditorPane() {
+  const pane = document.getElementById("editor-pane");
+  const viewer = document.getElementById("file-viewer");
+  if (pane) pane.classList.remove("viewer-active");
+  if (viewer) viewer.classList.add("hidden");
+  if (viewer) viewer.setAttribute("aria-hidden", "true");
+}
+
+function showFileViewer(path) {
+  const pane = document.getElementById("editor-pane");
+  const viewer = document.getElementById("file-viewer");
+  const img = document.getElementById("file-viewer-img");
+  const pdfFrame = document.getElementById("file-viewer-pdf");
+  if (!pane || !viewer || !img || !pdfFrame) return;
+  const ext = path.toLowerCase().slice(path.lastIndexOf("."));
+  const isPdf = ext === ".pdf";
+  const url = (typeof API_BASE !== "undefined" ? API_BASE : "") + "/file-raw?path=" + encodeURIComponent(path);
+  pane.classList.add("viewer-active");
+  viewer.classList.remove("hidden");
+  viewer.setAttribute("aria-hidden", "false");
+  if (isPdf) {
+    img.classList.add("hidden");
+    pdfFrame.classList.remove("hidden");
+    pdfFrame.src = url;
+  } else {
+    pdfFrame.classList.add("hidden");
+    pdfFrame.removeAttribute("src");
+    img.classList.remove("hidden");
+    img.src = url;
+  }
+}
 
 let editor = null;
 let currentFile = null;
@@ -50,6 +91,51 @@ function setTheme(theme) {
   if (monacoApi && editor) {
     monacoApi.editor.setTheme(getMonacoTheme());
   }
+}
+
+/** Ensure compiler API URL is absolute (avoid fetch relative to current origin). */
+function normalizeCompilerApiUrl(url) {
+  if (!url || !url.trim()) return "";
+  const u = url.trim();
+  if (u.startsWith("http://") || u.startsWith("https://")) return u;
+  return "https://" + u;
+}
+
+function getStoredCompilerApi() {
+  try {
+    const u = localStorage.getItem(STORAGE_COMPILER_API_URL);
+    return (u && u.trim()) ? u.trim() : "";
+  } catch (_) {}
+  return "";
+}
+
+function setCompilerApi(url) {
+  try {
+    if (url && url.trim()) localStorage.setItem(STORAGE_COMPILER_API_URL, url.trim());
+    else localStorage.removeItem(STORAGE_COMPILER_API_URL);
+  } catch (_) {}
+}
+
+function getStoredCompilerApiKey() {
+  try {
+    const k = localStorage.getItem(STORAGE_COMPILER_API_KEY);
+    return (k && k.trim()) ? k.trim() : "";
+  } catch (_) {}
+  return "";
+}
+
+function setCompilerApiKey(key) {
+  try {
+    if (key && key.trim()) localStorage.setItem(STORAGE_COMPILER_API_KEY, key.trim());
+    else localStorage.removeItem(STORAGE_COMPILER_API_KEY);
+  } catch (_) {}
+}
+
+function populateSettings() {
+  const input = document.getElementById("settings-compiler-api");
+  if (input) input.value = getStoredCompilerApi();
+  const keyInput = document.getElementById("settings-compiler-api-key");
+  if (keyInput) keyInput.value = getStoredCompilerApiKey();
 }
 
 function setConsole(text) {
@@ -198,6 +284,7 @@ function route() {
   if (r.page === "settings") {
     showView("settings-view");
     applyTheme(getStoredTheme());
+    populateSettings();
     return;
   }
   showView("editor-view");
@@ -330,11 +417,162 @@ function ensureMonacoReady(callback) {
   require.config({ paths: { vs: "https://unpkg.com/monaco-editor@latest/min/vs" } });
   require(["vs/editor/editor.main"], function () {
     monacoApi = monaco;
+    // Register LaTeX so completion provider and options apply
+    monaco.languages.register({ id: "latex" });
+    // Word pattern so that "\" and "\section" are "words" for suggest filtering (prefix matches our filterText "\\" + label)
+    monaco.languages.setLanguageConfiguration("latex", {
+      wordPattern: /\\[a-zA-Z*]*/
+    });
+
+    // Register BibTeX for .bib files
+    monaco.languages.register({ id: "bib" });
+    monaco.languages.setLanguageConfiguration("bib", {
+      wordPattern: /@[a-zA-Z]*|[a-zA-Z][a-zA-Z0-9]*/
+    });
+
     const editorEl = document.getElementById("editor");
     editor = monaco.editor.create(editorEl, {
       value: "",
       language: "latex",
-      theme: getMonacoTheme()
+      theme: getMonacoTheme(),
+      quickSuggestions: { other: true, comments: true, strings: true },
+      suggestOnTriggerCharacters: true,
+      acceptSuggestionOnEnter: "on",
+      suggest: {
+        showWords: false,
+        showSnippets: true,
+        showKeywords: true,
+        showFunctions: true,
+        showClasses: true,
+        showModules: true,
+        showVariables: true,
+        showReferences: true,
+        showFiles: true,
+        matchOnWordStartOnly: false
+      }
+    });
+
+    // LaTeX IntelliSense: load commands/envs from JSON, then populate list for completion provider
+    const kindMap = {
+      Class: monaco.languages.CompletionItemKind.Class,
+      Module: monaco.languages.CompletionItemKind.Module,
+      Snippet: monaco.languages.CompletionItemKind.Snippet,
+      Keyword: monaco.languages.CompletionItemKind.Keyword,
+      Function: monaco.languages.CompletionItemKind.Function,
+      Constant: monaco.languages.CompletionItemKind.Constant,
+      Reference: monaco.languages.CompletionItemKind.Reference,
+      File: monaco.languages.CompletionItemKind.File
+    };
+    let latexCommands = [];
+    fetch("/latex-commands.json")
+      .then(res => res.json())
+      .then(data => {
+        latexCommands = (data.commands || []).map(c => ({
+          label: c.label,
+          insertText: c.insertText,
+          detail: c.detail,
+          kind: kindMap[c.kind] ?? monaco.languages.CompletionItemKind.Keyword
+        }));
+        (data.environments || []).forEach(env => {
+          latexCommands.push({
+            label: env,
+            insertText: `begin{${env}}\n$0\n\\end{${env}}`,
+            detail: `Environment: ${env}`,
+            kind: monaco.languages.CompletionItemKind.Snippet
+          });
+        });
+      })
+      .catch(() => { latexCommands = []; });
+    monaco.languages.registerCompletionItemProvider("latex", {
+      triggerCharacters: ["\\", "{"],
+      provideCompletionItems(model, position) {
+        const line = model.getLineContent(position.lineNumber);
+        const offset = position.column - 1;
+        const textBefore = line.slice(0, offset);
+        const backslash = textBefore.lastIndexOf("\\");
+        if (backslash === -1) return { suggestions: [] };
+        const prefix = textBefore.slice(backslash + 1).replace(/[^a-zA-Z*]/g, "");
+        const range = { startLineNumber: position.lineNumber, startColumn: backslash + 2, endLineNumber: position.lineNumber, endColumn: position.column };
+        const suggestions = latexCommands
+          .filter(c => c.label.toLowerCase().startsWith(prefix.toLowerCase()))
+          .map(c => ({
+            ...c,
+            range,
+            filterText: "\\" + c.label,
+            insertTextRules: c.insertText && c.insertText.includes("$") ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined
+          }));
+        return { suggestions };
+      }
+    });
+
+    // BibTeX IntelliSense for .bib files: entry types after @, fields when typing
+    let bibEntryTypes = [];
+    let bibFields = [];
+    fetch("/bib-commands.json")
+      .then(res => res.json())
+      .then(data => {
+        bibEntryTypes = (data.entryTypes || []).map(e => ({
+          label: "@" + e.label,
+          insertText: e.insertText,
+          detail: e.detail,
+          kind: monaco.languages.CompletionItemKind.Class
+        }));
+        bibFields = (data.fields || []).map(f => ({
+          label: f.label,
+          insertText: f.insertText,
+          detail: f.detail,
+          kind: monaco.languages.CompletionItemKind.Field
+        }));
+      })
+      .catch(() => {});
+    monaco.languages.registerCompletionItemProvider("bib", {
+      triggerCharacters: ["@", "\n", " "],
+      provideCompletionItems(model, position) {
+        const line = model.getLineContent(position.lineNumber);
+        const offset = position.column - 1;
+        const textBefore = line.slice(0, offset);
+        const atSign = textBefore.lastIndexOf("@");
+        const suggestions = [];
+        if (atSign !== -1) {
+          const prefix = textBefore.slice(atSign + 1).replace(/[^a-zA-Z]/g, "");
+          const range = { startLineNumber: position.lineNumber, startColumn: atSign + 2, endLineNumber: position.lineNumber, endColumn: position.column };
+          bibEntryTypes
+            .filter(e => e.label.toLowerCase().startsWith("@" + prefix.toLowerCase()))
+            .forEach(e => {
+              suggestions.push({
+                ...e,
+                range,
+                filterText: e.label,
+                insertTextRules: e.insertText && e.insertText.includes("$") ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined
+              });
+            });
+        }
+        const wordStart = textBefore.search(/[a-zA-Z][a-zA-Z0-9]*$/);
+        const wordPrefix = wordStart === -1 ? "" : textBefore.slice(wordStart);
+        if (wordPrefix.length >= 1 && suggestions.length === 0) {
+          const range = wordStart === -1 ? { startLineNumber: position.lineNumber, startColumn: position.column, endLineNumber: position.lineNumber, endColumn: position.column } : { startLineNumber: position.lineNumber, startColumn: wordStart + 1, endLineNumber: position.lineNumber, endColumn: position.column };
+          bibFields
+            .filter(f => f.label.toLowerCase().startsWith(wordPrefix.toLowerCase()))
+            .forEach(f => {
+              suggestions.push({
+                ...f,
+                range,
+                filterText: f.label,
+                insertTextRules: f.insertText && f.insertText.includes("$") ? monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet : undefined
+              });
+            });
+        }
+        return { suggestions };
+      }
+    });
+
+    let autosaveTimeout = null;
+    const AUTOSAVE_DELAY_MS = 800;
+    editor.onDidChangeModelContent(() => {
+      clearTimeout(autosaveTimeout);
+      autosaveTimeout = setTimeout(() => {
+        if (currentFile) saveCurrentFile();
+      }, AUTOSAVE_DELAY_MS);
     });
     function layoutEditor() {
       if (editor && editorEl) {
@@ -514,7 +752,14 @@ async function deleteSidebarItem(path, isFolder) {
     }
     if (currentFile === path) {
       currentFile = null;
-      if (editor) editor.setValue("");
+      showEditorPane();
+      if (editor) {
+        editor.setValue("");
+        if (monacoApi) {
+          const model = editor.getModel();
+          if (model) monacoApi.editor.setModelLanguage(model, "latex");
+        }
+      }
     }
     if (currentFolderPath === path || (currentFolderPath && path.startsWith(currentFolderPath + "/"))) {
       currentFolderPath = null;
@@ -550,8 +795,15 @@ async function loadFiles() {
     const files = await res.json();
     if (!files || !files.length) {
       treeEl.innerHTML = '<div class="sidebar-placeholder">Repository is empty.</div>';
-      if (editor) editor.setValue("");
       currentFile = null;
+      showEditorPane();
+      if (editor) {
+        editor.setValue("");
+        if (monacoApi) {
+          const model = editor.getModel();
+          if (model) monacoApi.editor.setModelLanguage(model, "latex");
+        }
+      }
       setConsole("");
       return;
     }
@@ -566,8 +818,6 @@ async function loadFiles() {
 
 async function loadFile(path) {
   try {
-    const res = await fetchApi("/file?path=" + encodeURIComponent(path));
-    const data = await res.json();
     currentFile = path;
     currentFolderPath = null;
     const treeEl = getSidebarTreeEl();
@@ -577,7 +827,27 @@ async function loadFile(path) {
         li.classList.toggle("active", li.dataset.path === path);
       });
     }
-    if (editor) editor.setValue(data.content || "");
+    if (isViewableFile(path)) {
+      showFileViewer(path);
+      return;
+    }
+    const res = await fetchApi("/file?path=" + encodeURIComponent(path));
+    const data = await res.json();
+    if (data.error) {
+      setConsole("Error: " + data.error);
+      return;
+    }
+    showEditorPane();
+    if (editor) {
+      editor.setValue(data.content || "");
+      if (monacoApi) {
+        const model = editor.getModel();
+        if (model) {
+          const lang = path.endsWith(".tex") ? "latex" : path.endsWith(".bib") ? "bib" : "plaintext";
+          monacoApi.editor.setModelLanguage(model, lang);
+        }
+      }
+    }
   } catch (e) {
     setConsole("Error loading file: " + (e.message || path));
   }
@@ -689,6 +959,10 @@ async function saveCurrentFile() {
     await showConfirmModal({ message: "No file selected. Please open a file first.", confirmLabel: "OK" });
     return;
   }
+  if (isViewableFile(currentFile)) {
+    setConsole("Cannot edit image or PDF; open a text file to edit.");
+    return;
+  }
   const content = editor ? editor.getValue() : "";
   try {
     await fetchApi("/save", {
@@ -702,24 +976,70 @@ async function saveCurrentFile() {
   }
 }
 
+function setCompileLoading(loading) {
+  const btn = document.getElementById("btn-compile");
+  if (!btn) return;
+  const icon = btn.querySelector(".btn-compile-icon");
+  const text = btn.querySelector(".btn-compile-text");
+  if (loading) {
+    btn.classList.add("loading");
+    btn.disabled = true;
+    if (icon) icon.textContent = "sync";
+    if (text) text.textContent = "Compiling…";
+  } else {
+    btn.classList.remove("loading");
+    btn.disabled = false;
+    if (icon) icon.textContent = "build";
+    if (text) text.textContent = "Compile";
+  }
+}
+
 async function compile() {
   if (currentFile && currentFile.endsWith(".tex")) await saveCurrentFile();
   const mainFile = (currentFile && currentFile.endsWith(".tex")) ? currentFile : "main.tex";
+  const compilerApi = getStoredCompilerApi();
+  setCompileLoading(true);
   try {
-    const res = await fetchApi("/compile", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ main: mainFile })
-    });
-    const data = await res.json();
-    if (data.success && data.pdf) {
-      document.getElementById("pdf").src = (typeof API_BASE !== "undefined" ? API_BASE : "") + data.pdf;
-      setConsole("Compiled " + mainFile + " successfully.");
-    } else if (data.error) {
-      setConsole("Compile error:\n" + data.error);
+    if (compilerApi) {
+      const compilerUrl = normalizeCompilerApiUrl(compilerApi);
+      const contentRes = await fetchApi("/file?path=" + encodeURIComponent(mainFile));
+      const contentData = await contentRes.json();
+      const content = contentData.content != null ? contentData.content : "";
+      const apiKey = getStoredCompilerApiKey();
+      const headers = { "Content-Type": "application/json" };
+      if (apiKey) headers["Authorization"] = "Bearer " + apiKey;
+      const res = await fetch(compilerUrl, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ main: mainFile, content })
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data.success && data.pdf) {
+        document.getElementById("pdf").src = data.pdf;
+        setConsole("Compiled " + mainFile + " via API.");
+      } else if (data.error) {
+        setConsole("Compile error:\n" + (data.error || res.statusText));
+      } else {
+        setConsole("Compile failed: " + (res.statusText || "Invalid response from API"));
+      }
+    } else {
+      const res = await fetchApi("/compile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ main: mainFile })
+      });
+      const data = await res.json();
+      if (data.success && data.pdf) {
+        document.getElementById("pdf").src = (typeof API_BASE !== "undefined" ? API_BASE : "") + data.pdf;
+        setConsole("Compiled " + mainFile + " successfully.");
+      } else if (data.error) {
+        setConsole("Compile error:\n" + data.error);
+      }
     }
   } catch (e) {
     setConsole("Compile failed: " + (e.message || ""));
+  } finally {
+    setCompileLoading(false);
   }
 }
 
@@ -935,6 +1255,19 @@ document.addEventListener("click", function (e) {
     const theme = opt.getAttribute("data-theme");
     if (theme) setTheme(theme);
   }
+});
+
+document.getElementById("settings-compiler-api")?.addEventListener("change", function () {
+  setCompilerApi(this.value);
+});
+document.getElementById("settings-compiler-api")?.addEventListener("blur", function () {
+  setCompilerApi(this.value);
+});
+document.getElementById("settings-compiler-api-key")?.addEventListener("change", function () {
+  setCompilerApiKey(this.value);
+});
+document.getElementById("settings-compiler-api-key")?.addEventListener("blur", function () {
+  setCompilerApiKey(this.value);
 });
 
 document.getElementById("open-clone-modal-btn")?.addEventListener("click", openCloneModal);
