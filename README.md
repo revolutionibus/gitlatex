@@ -1,5 +1,13 @@
+Why I made this?
+================
+
+To be honest, for no reason.
+I felt like making a simple UI for latex projects as overleaf is expensive. 
+And I love vim, but my collaborators might not. So this is my attempt to solve that problem.
+
 To use this repo
 =================
+
 
 First install the node packages and then
 Run node server.js
