@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>LaTeX Git IDE</title>
+  <link rel="stylesheet" href="style.css" />
+  <script src="https://unpkg.com/monaco-editor@latest/min/vs/loader.js"></script>
+</head>
+<body>
+
+<div id="topbar">
+  <input id="repoUrl" placeholder="GitHub repo URL">
+  <button onclick="cloneRepo()">Clone</button>
+  <select id="repoSelect" onchange="selectRepo(this.value)"></select>
+  <button id="toggleSidebarBtn" onclick="toggleSidebar()">Hide Files</button>
+  <button onclick="saveCurrentFile()">Save</button>
+  <button onclick="compile()">Compile</button>
+  <button onclick="showCompileErrors()">Compiler Errors</button>
+  <button onclick="showStatus()">Git Status</button>
+  <button onclick="showDiff()">Git Diff</button>
+  <button onclick="commit()">Commit</button>
+  <button onclick="pushChanges()">Push</button>
+</div>
+
+<div id="container">
+  <div id="sidebar"></div>
+  <div id="editor"></div>
+  <iframe id="pdf"></iframe>
+</div>
+
+<pre id="console"></pre>
+
+<script src="app.js"></script>
+</body>
+</html>

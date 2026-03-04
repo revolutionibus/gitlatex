@@ -1,0 +1,12 @@
+body { margin: 0; font-family: sans-serif; }
+#topbar { padding: 10px; background: #222; color: white; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+#topbar input, #topbar select, #topbar button { font-size: 12px; }
+#container { display: flex; height: 80vh; }
+#sidebar { width: 20%; background: #eee; overflow: auto; }
+#editor { width: 40%; height: 100%; }
+#pdf { width: 40%; border: none; }
+
+/* When sidebar is hidden, let editor take more space */
+.sidebar-hidden #sidebar { display: none; }
+.sidebar-hidden #editor { width: 60%; }
+#console { margin: 0; padding: 8px; height: 20vh; overflow: auto; background: #111; color: #0f0; font-size: 12px; border-top: 1px solid #444; white-space: pre-wrap; }
