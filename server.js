@@ -7,7 +7,6 @@ const { exec } = require("child_process");
 
 const app = express();
 app.use(bodyParser.json());
-app.use(express.static("public"));
 
 const BASE_DIR = path.join(__dirname, "repos");
 
@@ -18,10 +17,40 @@ if (!fs.existsSync(BASE_DIR)) {
 let currentRepoPath = null;
 let lastCompileError = null;
 
+function countFilesInDir(dirPath) {
+  let count = 0;
+  try {
+    const entries = fs.readdirSync(dirPath);
+    for (const name of entries) {
+      const full = path.join(dirPath, name);
+      if (name === ".git") continue;
+      if (fs.statSync(full).isDirectory()) {
+        count += countFilesInDir(full);
+      } else {
+        count += 1;
+      }
+    }
+  } catch (_) {}
+  return count;
+}
+
+/* Parse owner from git remote URL (e.g. github.com/owner/repo or git@github.com:owner/repo.git) */
+function parseOwnerFromRemoteUrl(url) {
+  if (!url || typeof url !== "string") return null;
+  const u = url.trim();
+  const sshMatch = u.match(/[:/](?:github\.com[/:])?([^/]+)\/[^/]+(?:\.git)?$/);
+  if (sshMatch) return sshMatch[1];
+  const httpsMatch = u.match(/github\.com[/]([^/]+)\/[^/]+/);
+  if (httpsMatch) return httpsMatch[1];
+  const genericMatch = u.match(/([^/]+)\/[^/]+(?:\.git)?$/);
+  if (genericMatch) return genericMatch[1];
+  return null;
+}
+
 /* ---------------------------
-   List Repos
+   List Repos (with metadata from git + filesystem)
 ----------------------------*/
-app.get("/repos", (req, res) => {
+app.get("/repos", async (req, res) => {
   const entries = fs.readdirSync(BASE_DIR).filter(name => {
     const full = path.join(BASE_DIR, name);
     try {
@@ -31,8 +60,42 @@ app.get("/repos", (req, res) => {
     }
   });
 
+  const repos = await Promise.all(entries.map(async (name) => {
+    const full = path.join(BASE_DIR, name);
+    let fileCount = 0;
+    let lastModified = null;
+    let remoteUrl = null;
+    let owner = null;
+    let createdAt = null;
+    let createdBy = null;
+    try {
+      const stat = fs.statSync(full);
+      lastModified = stat.mtime ? stat.mtime.toISOString() : null;
+      fileCount = countFilesInDir(full);
+    } catch (_) {}
+    const gitDir = path.join(full, ".git");
+    if (fs.existsSync(gitDir) && fs.statSync(gitDir).isDirectory()) {
+      try {
+        const git = simpleGit(full);
+        const remotes = await git.getRemotes(true);
+        const origin = remotes.find(r => r.name === "origin");
+        if (origin && origin.refs && origin.refs.fetch) {
+          remoteUrl = origin.refs.fetch;
+          owner = parseOwnerFromRemoteUrl(remoteUrl);
+        }
+        const firstCommit = await git.raw(["log", "--reverse", "-1", "--format=%aI\n%an"]);
+        if (firstCommit && firstCommit.trim()) {
+          const [dateStr, author] = firstCommit.trim().split("\n");
+          if (dateStr) createdAt = dateStr;
+          if (author) createdBy = author.trim();
+        }
+      } catch (_) {}
+    }
+    return { name, fileCount, lastModified, remoteUrl, owner, createdAt, createdBy };
+  }));
+
   res.json({
-    repos: entries,
+    repos,
     current: currentRepoPath ? path.basename(currentRepoPath) : null
   });
 });
@@ -227,6 +290,9 @@ app.get("/diff", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// Static files last so /pdf/:file and other API routes take precedence
+app.use(express.static("public"));
 
 app.listen(3000, () =>
   console.log("Server running on http://localhost:3000")
