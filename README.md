@@ -8,6 +8,13 @@ And I love vim, but my collaborators might not. So this is my attempt to solve t
 To use this repo
 =================
 
+- Prerequisites: 
+
+  - nodejs
+  - git
+  - pdflatex
+  - and a latex distribution like texline or miktex
+
 
 First install the node packages and then
 Run node server.js
