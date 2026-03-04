@@ -40,7 +40,7 @@
         <label for="repoUrl">Repository URL</label>
         <div class="clone-row">
           <input id="repoUrl" type="text" placeholder="https://github.com/user/repo.git" aria-label="Repository URL">
-          <button type="button" class="primary btn-clone" onclick="cloneRepoAndRefresh()">Clone</button>
+          <button type="button" class="btn-toolbar primary" onclick="cloneRepoAndRefresh()">Clone</button>
         </div>
       </div>
     </div>
@@ -108,7 +108,21 @@
   </header>
 
   <div id="container">
-    <div id="sidebar"></div>
+    <div id="sidebar">
+      <div class="sidebar-header">
+        <button type="button" class="sidebar-btn" id="sidebar-new-file" title="New file" aria-label="New file">
+          <span class="material-icons">add</span>
+        </button>
+        <button type="button" class="sidebar-btn" id="sidebar-new-folder" title="New folder" aria-label="New folder">
+          <span class="material-icons">create_new_folder</span>
+        </button>
+        <button type="button" class="sidebar-btn" id="sidebar-upload" title="Upload files" aria-label="Upload files">
+          <span class="material-icons">upload_file</span>
+        </button>
+        <input type="file" id="sidebar-file-input" multiple hidden>
+      </div>
+      <div id="sidebar-tree"></div>
+    </div>
     <div class="resizer resizer-v" id="resizer-sidebar" title="Resize sidebar"></div>
     <div id="editor"></div>
     <div class="resizer resizer-v" id="resizer-pdf" title="Resize editor / PDF"></div>
@@ -128,6 +142,45 @@
     </div>
   </div>
 </div>
+
+  <!-- Generic input modal -->
+  <div id="input-modal" class="modal-overlay hidden" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="input-modal-title" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="input-modal-title">Input</h2>
+        <button type="button" class="modal-close" id="input-modal-cancel-btn" aria-label="Close">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <label id="input-modal-label" for="input-modal-field">Label</label>
+        <input type="text" id="input-modal-field" aria-label="Input" autocomplete="off">
+        <div class="modal-actions">
+          <button type="button" class="btn-toolbar" id="input-modal-cancel">Cancel</button>
+          <button type="button" class="btn-toolbar primary" id="input-modal-submit">Submit</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Generic confirm modal -->
+  <div id="confirm-modal" class="modal-overlay hidden" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="confirm-modal-title" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="confirm-modal-title">Confirm</h2>
+        <button type="button" class="modal-close" id="confirm-modal-close-btn" aria-label="Close">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="confirm-modal-message" class="confirm-message"></p>
+        <div class="modal-actions">
+          <button type="button" class="btn-toolbar" id="confirm-modal-cancel">Cancel</button>
+          <button type="button" class="btn-toolbar primary" id="confirm-modal-ok">Confirm</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
 <script src="https://unpkg.com/monaco-editor@latest/min/vs/loader.js"></script>
 <script src="app.js"></script>

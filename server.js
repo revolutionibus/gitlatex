@@ -180,6 +180,117 @@ app.post("/save", (req, res) => {
   res.json({ success: true });
 });
 
+/* Resolve path inside repo and ensure it stays within currentRepoPath */
+function resolveRepoPath(relativePath) {
+  if (!currentRepoPath) return null;
+  const normalized = path.normalize(relativePath).replace(/^(\.\.(\/|\\|$))+/, "");
+  const full = path.resolve(currentRepoPath, normalized);
+  const rel = path.relative(currentRepoPath, full);
+  if (rel.startsWith("..") || path.isAbsolute(rel)) return null;
+  return full;
+}
+
+/* ---------------------------
+   Create new file
+----------------------------*/
+app.post("/create-file", (req, res) => {
+  if (!currentRepoPath) {
+    return res.status(400).json({ error: "No repository selected" });
+  }
+  const relativePath = (req.body.path || req.body.name || "").trim();
+  if (!relativePath) return res.status(400).json({ error: "Missing path" });
+  const fullPath = resolveRepoPath(relativePath);
+  if (!fullPath) return res.status(400).json({ error: "Invalid path" });
+  try {
+    const dir = path.dirname(fullPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const content = req.body.content != null ? req.body.content : "";
+    fs.writeFileSync(fullPath, content);
+    res.json({ success: true, path: relativePath });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ---------------------------
+   Create folder
+----------------------------*/
+app.post("/create-folder", (req, res) => {
+  if (!currentRepoPath) {
+    return res.status(400).json({ error: "No repository selected" });
+  }
+  const relativePath = (req.body.path || req.body.name || "").trim();
+  if (!relativePath) return res.status(400).json({ error: "Missing path" });
+  const fullPath = resolveRepoPath(relativePath);
+  if (!fullPath) return res.status(400).json({ error: "Invalid path" });
+  try {
+    if (fs.existsSync(fullPath)) {
+      return res.status(400).json({ error: "Path already exists" });
+    }
+    fs.mkdirSync(fullPath, { recursive: true });
+    res.json({ success: true, path: relativePath });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ---------------------------
+   Delete file or folder
+----------------------------*/
+app.post("/delete", (req, res) => {
+  if (!currentRepoPath) {
+    return res.status(400).json({ error: "No repository selected" });
+  }
+  const relativePath = (req.body.path || req.body.name || "").trim();
+  if (!relativePath) return res.status(400).json({ error: "Missing path" });
+  const fullPath = resolveRepoPath(relativePath);
+  if (!fullPath) return res.status(400).json({ error: "Invalid path" });
+  try {
+    if (!fs.existsSync(fullPath)) {
+      return res.status(404).json({ error: "Path not found" });
+    }
+    const stat = fs.statSync(fullPath);
+    if (stat.isDirectory()) {
+      fs.rmSync(fullPath, { recursive: true });
+    } else {
+      fs.unlinkSync(fullPath);
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ---------------------------
+   Upload files (base64 in JSON)
+----------------------------*/
+app.post("/upload", (req, res) => {
+  if (!currentRepoPath) {
+    return res.status(400).json({ error: "No repository selected" });
+  }
+  const files = req.body.files;
+  if (!Array.isArray(files) || files.length === 0) {
+    return res.status(400).json({ error: "No files provided" });
+  }
+  const created = [];
+  try {
+    for (const { name, content } of files) {
+      const relativePath = (name || "").trim();
+      if (!relativePath) continue;
+      const fullPath = resolveRepoPath(relativePath);
+      if (!fullPath) continue;
+      const dir = path.dirname(fullPath);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const buf = Buffer.from(content || "", "base64");
+      fs.writeFileSync(fullPath, buf);
+      created.push(relativePath);
+    }
+    res.json({ success: true, created });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 /* ---------------------------
    Compile LaTeX
 ----------------------------*/

@@ -16,8 +16,11 @@ To use this repo
   - and a latex distribution like texline or miktex
 
 
-First install the node packages and then
-Run node server.js
+First install the node packages and then run:
+
+  node server.js
+
+Open the app at **http://localhost:3000** in your browser. If you open it from another port (e.g. a separate dev server), the app will still call the API at http://localhost:3000.
 
 1. create a basic github repo for your latex project
 2. clone it  by pasting the url to the UI
