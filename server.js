@@ -6,7 +6,8 @@ const path = require("path");
 const { exec } = require("child_process");
 
 const app = express();
-app.use(bodyParser.json());
+// Allow large payloads when sending full repo to external compiler
+app.use(bodyParser.json({ limit: "50mb" }));
 
 const BASE_DIR = path.join(__dirname, "repos");
 
@@ -85,8 +86,10 @@ app.get("/repos", async (req, res) => {
       lastModified = stat.mtime ? stat.mtime.toISOString() : null;
       fileCount = countFilesInDir(full);
     } catch (_) {}
+    let hasGit = false;
     const gitDir = path.join(full, ".git");
     if (fs.existsSync(gitDir) && fs.statSync(gitDir).isDirectory()) {
+      hasGit = true;
       try {
         const git = simpleGit(full);
         const remotes = await git.getRemotes(true);
@@ -103,7 +106,7 @@ app.get("/repos", async (req, res) => {
         }
       } catch (_) {}
     }
-    return { name, fileCount, lastModified, remoteUrl, owner, createdAt, createdBy };
+    return { name, hasGit, fileCount, lastModified, remoteUrl, owner, createdAt, createdBy };
   }));
 
   res.json({
@@ -113,7 +116,50 @@ app.get("/repos", async (req, res) => {
 });
 
 /* ---------------------------
-   Select Repo
+   Delete repo (remove folder from repos/)
+----------------------------*/
+app.post("/delete-repo", (req, res) => {
+  const name = (req.body.name || "").trim().replace(/^[/\\]+/, "");
+  if (!name) return res.status(400).json({ error: "Missing repo name" });
+  if (name.includes("..") || path.isAbsolute(name)) return res.status(400).json({ error: "Invalid repo name" });
+  const fullPath = path.join(BASE_DIR, name);
+  const realBase = path.resolve(BASE_DIR);
+  const realFull = path.resolve(fullPath);
+  if (realFull !== realBase && !realFull.startsWith(realBase + path.sep)) {
+    return res.status(400).json({ error: "Invalid repo name" });
+  }
+  try {
+    if (!fs.existsSync(fullPath)) return res.status(404).json({ error: "Repository not found" });
+    if (!fs.statSync(fullPath).isDirectory()) return res.status(400).json({ error: "Not a directory" });
+    if (currentRepoPath && path.resolve(currentRepoPath) === realFull) currentRepoPath = null;
+    fs.rmSync(fullPath, { recursive: true });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ---------------------------
+   Create workspace (local folder only, no git)
+----------------------------*/
+app.post("/create-workspace", (req, res) => {
+  const raw = (req.body.name || "").trim();
+  if (!raw) return res.status(400).json({ error: "Missing name" });
+  const name = raw.replace(/[/\\:*?"<>|]/g, "-").replace(/\s+/g, "-") || "new-folder";
+  const fullPath = path.join(BASE_DIR, name);
+  try {
+    if (fs.existsSync(fullPath)) {
+      return res.status(400).json({ error: "A folder with that name already exists" });
+    }
+    fs.mkdirSync(fullPath, { recursive: true });
+    res.json({ success: true, name });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ---------------------------
+   Select Repo / Workspace
 ----------------------------*/
 app.post("/select-repo", (req, res) => {
   const { name } = req.body;
@@ -125,7 +171,9 @@ app.post("/select-repo", (req, res) => {
   }
 
   currentRepoPath = repoPath;
-  res.json({ success: true });
+  const gitDir = path.join(repoPath, ".git");
+  const hasGit = fs.existsSync(gitDir) && fs.statSync(gitDir).isDirectory();
+  res.json({ success: true, hasGit });
 });
 
 /* ---------------------------
@@ -151,21 +199,95 @@ app.post("/clone", async (req, res) => {
 ----------------------------*/
 app.get("/files", (req, res) => {
   function readDirRecursive(dir) {
-    return fs.readdirSync(dir).map(file => {
+    const entries = fs.readdirSync(dir);
+    const hasTexWithSameStem = (baseName) => {
+      const lower = baseName.toLowerCase();
+      return entries.some((e) => {
+        const full = path.join(dir, e);
+        if (!fs.statSync(full).isFile()) return false;
+        const stem = path.basename(e, path.extname(e));
+        return stem.toLowerCase() === lower && e.toLowerCase().endsWith(".tex");
+      });
+    };
+    return entries.map((file) => {
       const full = path.join(dir, file);
-      // Skip VCS metadata directories
-      if (file === ".git") {
-        return null;
+      if (file === ".git") return null;
+      if (fs.statSync(full).isDirectory()) {
+        return { name: file, type: "folder", children: readDirRecursive(full) };
       }
-      return fs.statSync(full).isDirectory()
-        ? { name: file, type: "folder", children: readDirRecursive(full) }
-        : { name: file, type: "file" };
+      if (file.toLowerCase().endsWith(".pdf")) {
+        const stem = path.basename(file, path.extname(file));
+        if (hasTexWithSameStem(stem)) return null;
+      }
+      return { name: file, type: "file" };
     }).filter(Boolean);
   }
 
   if (!currentRepoPath) return res.json([]);
 
   res.json(readDirRecursive(currentRepoPath));
+});
+
+/* Flatten file tree to array of relative paths */
+function flattenFileTree(tree, prefix = "") {
+  const out = [];
+  for (const node of tree) {
+    const rel = prefix ? prefix + path.sep + node.name : node.name;
+    if (node.type === "folder" && node.children) {
+      out.push(...flattenFileTree(node.children, rel));
+    } else if (node.type === "file") {
+      out.push(rel);
+    }
+  }
+  return out;
+}
+
+/* Max size for a single file to include in bundle (bytes); skip larger binaries */
+const REPO_FILE_MAX_SIZE = 5 * 1024 * 1024;
+
+/* ---------------------------
+   Get all repo file contents (for external compiler)
+----------------------------*/
+app.get("/repo-files-content", (req, res) => {
+  if (!currentRepoPath) {
+    return res.status(400).json({ error: "No repository selected" });
+  }
+  const tree = (function readDir(dir) {
+    return fs.readdirSync(dir).map((file) => {
+      const full = path.join(dir, file);
+      if (file === ".git") return null;
+      return fs.statSync(full).isDirectory()
+        ? { name: file, type: "folder", children: readDir(full) }
+        : { name: file, type: "file" };
+    }).filter(Boolean);
+  })(currentRepoPath);
+
+  const paths = flattenFileTree(tree);
+  const files = [];
+
+  for (const rel of paths) {
+    const fullPath = path.join(currentRepoPath, rel);
+    try {
+      const stat = fs.statSync(fullPath);
+      if (!stat.isFile()) continue;
+      if (stat.size > REPO_FILE_MAX_SIZE) continue;
+
+      const ext = path.extname(fullPath).toLowerCase();
+      const isBinary = MIME_TYPES[ext] || /\.(pdf|zip|exe|dll)$/i.test(rel);
+
+      if (isBinary) {
+        const buf = fs.readFileSync(fullPath);
+        files.push({ path: rel.replace(/\\/g, "/"), base64: buf.toString("base64") });
+      } else {
+        const content = fs.readFileSync(fullPath, "utf8");
+        files.push({ path: rel.replace(/\\/g, "/"), content });
+      }
+    } catch (_) {
+      // skip unreadable files
+    }
+  }
+
+  res.json({ files });
 });
 
 /* ---------------------------
@@ -276,6 +398,48 @@ app.post("/create-folder", (req, res) => {
 });
 
 /* ---------------------------
+   Move file or folder
+----------------------------*/
+app.post("/move", (req, res) => {
+  if (!currentRepoPath) {
+    return res.status(400).json({ error: "No repository selected" });
+  }
+  const fromRel = (req.body.from || "").trim().replace(/^[/\\]+/, "");
+  const toRel = (req.body.to || "").trim().replace(/^[/\\]+/, "");
+  if (!fromRel || !toRel) return res.status(400).json({ error: "Missing from or to" });
+  const fromFull = resolveRepoPath(fromRel);
+  let toFull = resolveRepoPath(toRel);
+  if (!fromFull || !toFull) return res.status(400).json({ error: "Invalid path" });
+  try {
+    if (!fs.existsSync(fromFull)) {
+      return res.status(404).json({ error: "Source not found" });
+    }
+    const fromStat = fs.statSync(fromFull);
+    const fromName = path.basename(fromRel);
+    if (fs.existsSync(toFull) && fs.statSync(toFull).isDirectory()) {
+      toFull = path.join(toFull, fromName);
+    } else {
+      const toDir = path.dirname(toFull);
+      if (!fs.existsSync(toDir)) fs.mkdirSync(toDir, { recursive: true });
+    }
+    if (fromFull === toFull) return res.json({ success: true });
+    const toNorm = path.normalize(toFull);
+    const fromNorm = path.normalize(fromFull);
+    if (fromStat.isDirectory() && (toNorm === fromNorm || toNorm.startsWith(fromNorm + path.sep))) {
+      return res.status(400).json({ error: "Cannot move folder into itself or a descendant" });
+    }
+    if (fs.existsSync(toFull)) {
+      return res.status(400).json({ error: "Destination already exists" });
+    }
+    fs.renameSync(fromFull, toFull);
+    const newRel = path.relative(currentRepoPath, toFull).replace(/\\/g, "/");
+    res.json({ success: true, path: newRel });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+/* ---------------------------
    Delete file or folder
 ----------------------------*/
 app.post("/delete", (req, res) => {
@@ -369,12 +533,51 @@ app.get("/compile-error", (req, res) => {
 });
 
 /* ---------------------------
+   Save PDF (e.g. from external compiler) into current repo
+   Handlers at /save-pdf and /api/save-pdf so proxies that only forward /api still work.
+----------------------------*/
+function handleSavePdf(req, res) {
+  if (!currentRepoPath) {
+    return res.status(400).json({ error: "No repository selected" });
+  }
+  const relativePath = (req.body.path || req.body.name || "").trim().replace(/^[/\\]+/, "");
+  if (!relativePath || !relativePath.toLowerCase().endsWith(".pdf")) {
+    return res.status(400).json({ error: "Missing or invalid path (must be .pdf)" });
+  }
+  const fullPath = resolveRepoPath(relativePath);
+  if (!fullPath) return res.status(400).json({ error: "Invalid path" });
+  const base64 = req.body.content;
+  if (typeof base64 !== "string" || !base64) {
+    return res.status(400).json({ error: "Missing content (base64)" });
+  }
+  try {
+    const buf = Buffer.from(base64, "base64");
+    if (buf.length === 0) return res.status(400).json({ error: "Invalid or empty base64 content" });
+    const dir = path.dirname(fullPath);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(fullPath, buf);
+    res.json({ success: true, path: relativePath });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+}
+app.post("/save-pdf", handleSavePdf);
+app.post("/api/save-pdf", handleSavePdf);
+
+/* ---------------------------
    Serve PDF
 ----------------------------*/
+app.get("/pdf", (req, res) => {
+  if (!currentRepoPath) return res.status(400).send("No repository selected");
+  const relativePath = (req.query.path || "").trim().replace(/^[/\\]+/, "");
+  if (!relativePath) return res.status(400).send("Missing path");
+  const fullPath = resolveRepoPath(relativePath);
+  if (!fullPath) return res.status(404).send("Not found");
+  if (!fs.existsSync(fullPath) || !fs.statSync(fullPath).isFile()) return res.status(404).send("Not found");
+  res.sendFile(fullPath);
+});
 app.get("/pdf/:file", (req, res) => {
-  if (!currentRepoPath) {
-    return res.status(400).send("No repository selected");
-  }
+  if (!currentRepoPath) return res.status(400).send("No repository selected");
   res.sendFile(path.join(currentRepoPath, req.params.file));
 });
 

@@ -3,7 +3,7 @@ const THEME_KEY = "gitlatex-theme";
 const STORAGE_COMPILER_API_URL = "gitlatex-compiler-api";
 const STORAGE_COMPILER_API_KEY = "gitlatex-compiler-api-key";
 
-/** API base URL: same origin, or http://localhost:3000 when on file:// or when on another port (e.g. dev server on 5173). */
+/** API base URL: same origin, or http://localhost:3000 when on file:// or another port. */
 function getApiBase() {
   if (typeof window === "undefined" || !window.location) return "http://localhost:3000";
   const o = window.location.origin;
@@ -144,9 +144,12 @@ function setConsole(text) {
   el.textContent = text || "";
 }
 
-/** Same as fetch but URL is relative to API_BASE (so backend works when app is opened from another port). */
+/** Same as fetch but URL is relative to API base. Normalizes to avoid double slashes. Uses current getApiBase() so settings apply. */
 function fetchApi(url, options) {
-  return fetch((typeof API_BASE !== "undefined" ? API_BASE : "") + url, options);
+  const base = getApiBase() || "";
+  const path = (url || "").replace(/^\//, "");
+  const fullUrl = base ? (base.replace(/\/$/, "") + "/" + path) : "/" + path;
+  return fetch(fullUrl, options);
 }
 
 /** Fetch and parse JSON; on HTML or invalid JSON return { error: message }. */
@@ -296,6 +299,34 @@ function openEditor(repoName) {
   window.location.hash = "#/editor/" + encodeURIComponent(repoName);
 }
 
+async function deleteRepo(name) {
+  const ok = await showConfirmModal({
+    message: "Delete repository \u201C" + name + "\u201D? All files and history will be removed. This cannot be undone.",
+    confirmLabel: "Delete"
+  });
+  if (!ok) return;
+  try {
+    const res = await fetchApi("/delete-repo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (data.error) {
+      setConsole("Delete repo failed: " + data.error);
+      return;
+    }
+    try {
+      const editorRepo = decodeURIComponent((location.hash || "").replace("#/editor/", "").split("/")[0] || "");
+      if (editorRepo === name) location.hash = "#/";
+    } catch (_) {}
+    await loadRepoList();
+    setConsole("Deleted repository " + name);
+  } catch (e) {
+    setConsole("Delete repo failed: " + (e.message || ""));
+  }
+}
+
 // ----- Home: repo list -----
 async function loadRepoList() {
   const listEl = document.getElementById("repo-list");
@@ -305,18 +336,30 @@ async function loadRepoList() {
     const res = await fetchApi("/repos");
     const data = await res.json();
     const repos = Array.isArray(data.repos) ? data.repos : [];
-    const items = repos.map(r => (typeof r === "string" ? { name: r, fileCount: null, lastModified: null, owner: null, createdAt: null, createdBy: null } : r));
+    const items = repos.map(r => {
+      if (typeof r === "string") return { name: r, hasGit: false, fileCount: null, lastModified: null, owner: null, createdAt: null, createdBy: null };
+      const hasGit = r.hasGit === true || !!(r.remoteUrl || r.owner);
+      return { ...r, hasGit };
+    });
     listEl.innerHTML = "";
-    items.forEach(({ name, fileCount, lastModified, owner, createdAt, createdBy }) => {
-      const card = document.createElement("button");
-      card.type = "button";
+    items.forEach(({ name, hasGit, fileCount, lastModified, owner, createdAt, createdBy }) => {
+      const card = document.createElement("div");
       card.className = "repo-card";
+      const cardInner = document.createElement("button");
+      cardInner.type = "button";
+      cardInner.className = "repo-card-inner";
       const title = document.createElement("span");
       title.className = "repo-card-title";
       title.textContent = name;
-      card.appendChild(title);
+      cardInner.appendChild(title);
       const meta = document.createElement("div");
       meta.className = "repo-card-meta";
+      const typeBadge = document.createElement("span");
+      typeBadge.className = "repo-card-type repo-card-type-tag" + (hasGit ? " repo-card-type-git" : " repo-card-type-local");
+      typeBadge.setAttribute("aria-label", hasGit ? "Git repository" : "Local folder");
+      typeBadge.title = hasGit ? "Git repository" : "Local folder";
+      typeBadge.textContent = hasGit ? "Git" : "Local";
+      meta.appendChild(typeBadge);
       function addMetaItem(icon, text, title) {
         const item = document.createElement("span");
         item.className = "repo-meta-item";
@@ -342,8 +385,21 @@ async function loadRepoList() {
         } catch (_) {}
       }
       if (fileCount != null && fileCount > 0) addMetaItem("folder", fileCount === 1 ? "1 file" : fileCount + " files", null);
-      if (meta.children.length) card.appendChild(meta);
-      card.addEventListener("click", () => openEditor(name));
+      if (meta.children.length) cardInner.appendChild(meta);
+      cardInner.addEventListener("click", () => openEditor(name));
+      card.appendChild(cardInner);
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "repo-card-delete icon-btn";
+      delBtn.setAttribute("aria-label", "Delete repository " + name);
+      delBtn.title = "Delete repository";
+      delBtn.innerHTML = "<span class=\"material-icons\" aria-hidden=\"true\">delete</span>";
+      delBtn.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        deleteRepo(name);
+      });
+      card.appendChild(delBtn);
       listEl.appendChild(card);
     });
     if (emptyEl) emptyEl.classList.toggle("hidden", items.length > 0);
@@ -353,6 +409,66 @@ async function loadRepoList() {
       emptyEl.textContent = "Could not load repositories.";
       emptyEl.classList.remove("hidden");
     }
+  }
+}
+
+function openCreateWorkspaceModal() {
+  const modal = document.getElementById("create-workspace-modal");
+  if (modal) {
+    modal.classList.remove("hidden");
+    modal.setAttribute("aria-hidden", "false");
+    const input = document.getElementById("new-workspace-name");
+    if (input) {
+      input.value = "";
+      input.focus();
+    }
+  }
+}
+
+function closeCreateWorkspaceModal() {
+  const modal = document.getElementById("create-workspace-modal");
+  if (modal) {
+    document.getElementById("open-create-workspace-modal-btn")?.focus();
+    modal.classList.add("hidden");
+    modal.setAttribute("aria-hidden", "true");
+  }
+}
+
+async function createWorkspaceAndOpen() {
+  const input = document.getElementById("new-workspace-name");
+  const name = (input && input.value || "").trim();
+  if (!name) {
+    alert("Enter a folder name.");
+    return;
+  }
+  try {
+    const res = await fetchApi("/create-workspace", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name })
+    });
+    const text = await res.text();
+    let data = {};
+    if (text.trimStart().startsWith("<")) {
+      alert("Create failed: server returned an error page (status " + res.status + "). Is the backend running at " + (getApiBase() || "this origin") + "?");
+      return;
+    }
+    try {
+      data = JSON.parse(text);
+    } catch (_) {
+      alert("Create failed: invalid response (status " + res.status + ")");
+      return;
+    }
+    if (data.error) {
+      alert("Create failed: " + data.error);
+      return;
+    }
+    if (input) input.value = "";
+    closeCreateWorkspaceModal();
+    await loadRepoList();
+    openEditor(data.name || name);
+  } catch (e) {
+    alert("Create failed: " + (e.message || "Network error"));
   }
 }
 
@@ -606,6 +722,8 @@ async function openEditorPage(repoName) {
       setConsole("Failed to open repo: " + data.error);
       return;
     }
+    const toolbarGit = document.getElementById("toolbar-git");
+    if (toolbarGit) toolbarGit.style.display = (data.hasGit === true) ? "" : "none";
   } catch (e) {
     setConsole("Failed to open repo: " + (e.message || "Network error"));
     return;
@@ -676,6 +794,42 @@ function renderFileTree(files, container, basePath = "", activePath = null, sele
     row.appendChild(delBtn);
     return { row, chevron };
   }
+  const DRAG_TYPE = "application/x-gitlatex-path";
+
+  function setupDragSource(li, fullPath, isFolder) {
+    li.draggable = true;
+    li.addEventListener("dragstart", (e) => {
+      e.dataTransfer.setData(DRAG_TYPE, fullPath);
+      e.dataTransfer.effectAllowed = "move";
+      e.dataTransfer.setData("text/plain", fullPath);
+      li.classList.add("sidebar-drag-source");
+    });
+    li.addEventListener("dragend", () => li.classList.remove("sidebar-drag-source"));
+  }
+
+  function setupDropTarget(el, getTargetPath, dropFolderPath = null) {
+    el.addEventListener("dragover", (e) => {
+      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      el.classList.add("sidebar-drop-target");
+    });
+    el.addEventListener("dragleave", (e) => {
+      if (!el.contains(e.relatedTarget)) el.classList.remove("sidebar-drop-target");
+    });
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      el.classList.remove("sidebar-drop-target");
+      const fromPath = e.dataTransfer.getData(DRAG_TYPE);
+      if (!fromPath) return;
+      const toPath = getTargetPath(fromPath);
+      if (!toPath || toPath === fromPath) return;
+      if (toPath.startsWith(fromPath + "/")) return;
+      if (dropFolderPath && fromPath === dropFolderPath) return;
+      moveSidebarItem(fromPath, toPath);
+    });
+  }
+
   function walk(nodes, parentPath, parentUl) {
     const list = (nodes || []).slice();
     list.sort((a, b) => {
@@ -698,6 +852,8 @@ function renderFileTree(files, container, basePath = "", activePath = null, sele
         const childUl = document.createElement("ul");
         walk(node.children || [], fullPath, childUl);
         li.appendChild(childUl);
+        setupDragSource(li, fullPath, true);
+        setupDropTarget(li, (from) => fullPath + "/" + from.split("/").pop(), fullPath);
         row.addEventListener("click", (e) => {
           e.stopPropagation();
           if (e.target.closest(".sidebar-delete-btn")) return;
@@ -722,6 +878,7 @@ function renderFileTree(files, container, basePath = "", activePath = null, sele
         if (node.name.endsWith(".tex")) li.classList.add("tex-file");
         const row = makeRow(node.name, fullPath, false);
         li.appendChild(row);
+        setupDragSource(li, fullPath, false);
         row.addEventListener("click", () => {
           currentFolderPath = null;
           loadFile(fullPath);
@@ -732,6 +889,55 @@ function renderFileTree(files, container, basePath = "", activePath = null, sele
   }
   walk(files, basePath, ul);
   container.appendChild(ul);
+
+  if (container.id === "sidebar-tree") {
+    container.addEventListener("dragover", (e) => {
+      if (e.target.closest("li")) return;
+      if (!e.dataTransfer.types.includes(DRAG_TYPE)) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
+      container.classList.add("sidebar-drop-target");
+    });
+    container.addEventListener("dragleave", (e) => {
+      if (!container.contains(e.relatedTarget)) container.classList.remove("sidebar-drop-target");
+    });
+    container.addEventListener("drop", (e) => {
+      if (e.target.closest("li")) return;
+      e.preventDefault();
+      container.classList.remove("sidebar-drop-target");
+      const fromPath = e.dataTransfer.getData(DRAG_TYPE);
+      if (!fromPath) return;
+      const toPath = fromPath.split("/").pop();
+      if (toPath === fromPath) return;
+      moveSidebarItem(fromPath, toPath);
+    });
+  }
+}
+
+async function moveSidebarItem(fromPath, toPath) {
+  try {
+    const data = await fetchJson("/move", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ from: fromPath, to: toPath })
+    });
+    if (data.error) {
+      setConsole("Move failed: " + data.error);
+      return;
+    }
+    const newPath = data.path != null ? data.path : toPath;
+    if (currentFile === fromPath) {
+      currentFile = newPath;
+      loadFile(newPath);
+    }
+    if (currentFolderPath === fromPath || (currentFolderPath && fromPath.startsWith(currentFolderPath + "/"))) {
+      currentFolderPath = newPath.startsWith(currentFolderPath + "/") ? currentFolderPath : null;
+    }
+    await loadFiles();
+    setConsole("Moved " + fromPath + " → " + newPath);
+  } catch (e) {
+    setConsole("Move failed: " + (e.message || ""));
+  }
 }
 
 async function deleteSidebarItem(path, isFolder) {
@@ -846,6 +1052,20 @@ async function loadFile(path) {
           const lang = path.endsWith(".tex") ? "latex" : path.endsWith(".bib") ? "bib" : "plaintext";
           monacoApi.editor.setModelLanguage(model, lang);
         }
+      }
+    }
+    if (path.toLowerCase().endsWith(".tex")) {
+      const pdfPath = path.replace(/\.tex$/i, ".pdf");
+      const base = getApiBase() || "";
+      const pdfUrl = base + (pdfPath.includes("/") ? "/pdf?path=" + encodeURIComponent(pdfPath) : "/pdf/" + pdfPath);
+      const pdfEl = document.getElementById("pdf");
+      if (pdfEl) {
+        fetch(pdfUrl, { method: "HEAD" })
+          .then((r) => {
+            if (r.ok) pdfEl.src = pdfUrl;
+            else pdfEl.removeAttribute("src");
+          })
+          .catch(() => pdfEl.removeAttribute("src"));
       }
     }
   } catch (e) {
@@ -1002,21 +1222,68 @@ async function compile() {
   try {
     if (compilerApi) {
       const compilerUrl = normalizeCompilerApiUrl(compilerApi);
-      const contentRes = await fetchApi("/file?path=" + encodeURIComponent(mainFile));
-      const contentData = await contentRes.json();
-      const content = contentData.content != null ? contentData.content : "";
+      const bundleRes = await fetchApi("/repo-files-content");
+      const bundleData = await bundleRes.json();
+      const files = Array.isArray(bundleData.files) ? bundleData.files : [];
       const apiKey = getStoredCompilerApiKey();
       const headers = { "Content-Type": "application/json" };
       if (apiKey) headers["Authorization"] = "Bearer " + apiKey;
       const res = await fetch(compilerUrl, {
         method: "POST",
         headers,
-        body: JSON.stringify({ main: mainFile, content })
+        body: JSON.stringify({ main: mainFile, files })
       });
       const data = await res.json().catch(() => ({}));
       if (data.success && data.pdf) {
-        document.getElementById("pdf").src = data.pdf;
-        setConsole("Compiled " + mainFile + " via API.");
+        const pdfPath = mainFile.replace(/\.tex$/i, ".pdf");
+        const pdfStr = typeof data.pdf === "string" ? data.pdf : "";
+        const isDataUrl = pdfStr.includes("base64,");
+        if (isDataUrl) {
+          const base64 = pdfStr.includes(",") ? pdfStr.slice(pdfStr.indexOf(",") + 1).trim() : pdfStr;
+          if (!base64) {
+            document.getElementById("pdf").src = data.pdf;
+            setConsole("Compiled " + mainFile + " via API.");
+          } else {
+            const savePayload = { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ path: pdfPath, content: base64 }) };
+            const trySave = async (path) => {
+              const saveRes = await fetchApi(path, savePayload);
+              let saveData = {};
+              try {
+                saveData = await saveRes.json();
+              } catch (_) {
+                saveData = { error: "Invalid response (status " + saveRes.status + ")" };
+              }
+              return { saveRes, saveData };
+            };
+            let saveRes, saveData;
+            const r1 = await trySave("/save-pdf");
+            if (r1.saveRes.status === 404) {
+              const r2 = await trySave("/api/save-pdf");
+              saveRes = r2.saveRes;
+              saveData = r2.saveData;
+            } else {
+              saveRes = r1.saveRes;
+              saveData = r1.saveData;
+            }
+            try {
+              if (saveRes.ok && saveData.success) {
+                const base = getApiBase() || "";
+                const pdfUrl = base + (pdfPath.includes("/") ? "/pdf?path=" + encodeURIComponent(pdfPath) : "/pdf/" + pdfPath);
+                document.getElementById("pdf").src = pdfUrl;
+                setConsole("Compiled " + mainFile + " via API. PDF saved to " + pdfPath);
+              } else {
+                document.getElementById("pdf").src = data.pdf;
+                setConsole("Compiled " + mainFile + " via API. Save to repo failed: " + (saveData.error || saveRes.status || "unknown"));
+              }
+            } catch (e) {
+              document.getElementById("pdf").src = data.pdf;
+              setConsole("Compiled " + mainFile + " via API. Save to repo failed: " + (e.message || "network error"));
+            }
+          }
+        } else {
+          document.getElementById("pdf").src = data.pdf;
+          setConsole("Compiled " + mainFile + " via API.");
+        }
       } else if (data.error) {
         setConsole("Compile error:\n" + (data.error || res.statusText));
       } else {
@@ -1270,6 +1537,14 @@ document.getElementById("settings-compiler-api-key")?.addEventListener("blur", f
   setCompilerApiKey(this.value);
 });
 
+document.getElementById("open-create-workspace-modal-btn")?.addEventListener("click", openCreateWorkspaceModal);
+document.getElementById("create-workspace-submit")?.addEventListener("click", createWorkspaceAndOpen);
+document.getElementById("new-workspace-name")?.addEventListener("keydown", function (e) {
+  if (e.key === "Enter") {
+    e.preventDefault();
+    createWorkspaceAndOpen();
+  }
+});
 document.getElementById("open-clone-modal-btn")?.addEventListener("click", openCloneModal);
 
 document.getElementById("sidebar-new-file")?.addEventListener("click", addNewFileSidebar);
@@ -1277,14 +1552,21 @@ document.getElementById("sidebar-new-folder")?.addEventListener("click", addNewF
 document.getElementById("sidebar-upload")?.addEventListener("click", uploadFilesSidebar);
 document.getElementById("sidebar-file-input")?.addEventListener("change", handleSidebarFileInputChange);
 
+document.getElementById("create-workspace-modal")?.addEventListener("click", function (e) {
+  if (e.target === this) closeCreateWorkspaceModal();
+});
 document.getElementById("clone-modal")?.addEventListener("click", function (e) {
   if (e.target === this) closeCloneModal();
 });
 
 document.addEventListener("keydown", function (e) {
   if (e.key === "Escape") {
-    const modal = document.getElementById("clone-modal");
-    if (modal && !modal.classList.contains("hidden")) closeCloneModal();
+    const createModal = document.getElementById("create-workspace-modal");
+    if (createModal && !createModal.classList.contains("hidden")) closeCreateWorkspaceModal();
+    else {
+      const modal = document.getElementById("clone-modal");
+      if (modal && !modal.classList.contains("hidden")) closeCloneModal();
+    }
   }
 });
 

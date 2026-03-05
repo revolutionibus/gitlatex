@@ -482,6 +482,17 @@ body.sidebar-hidden #toggleSidebarBtn {
   border-left-color: var(--accent);
 }
 
+#sidebar li.sidebar-drag-source {
+  opacity: 0.6;
+}
+
+#sidebar .sidebar-drop-target,
+#sidebar-tree.sidebar-drop-target {
+  background: var(--accent-muted);
+  border-left: 2px solid var(--accent);
+  outline: none;
+}
+
 #sidebar li ul {
   padding-left: 8px;
   border-left: 1px solid var(--border-default);
@@ -736,6 +747,12 @@ body.sidebar-hidden #toggleSidebarBtn {
   color: var(--text-primary);
   padding: 0 8px;
 }
+.app-name-git {
+  color: var(--accent-hover);
+}
+.app-name-latex {
+  color: var(--accent);
+}
 
 .home-content {
   flex: 1;
@@ -876,6 +893,25 @@ body.sidebar-hidden #toggleSidebarBtn {
   border-top: 1px solid var(--border-subtle);
 }
 
+#create-workspace-modal .modal-body input[type="text"] {
+  display: block;
+  width: 100%;
+  margin-top: 8px;
+  margin-bottom: 4px;
+  height: 36px;
+  padding: 0 12px;
+  font-size: 13px;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+#create-workspace-modal .modal-body input[type="text"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-muted);
+}
+
 #input-modal .modal-body label,
 #input-modal .modal-body input[type="text"] {
   display: block;
@@ -959,24 +995,57 @@ body.sidebar-hidden #toggleSidebarBtn {
 
 .repo-card {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: flex-start;
   width: 100%;
-  padding: 16px 20px;
+  padding: 0;
   text-align: left;
   font-family: var(--font-sans);
   color: var(--text-primary);
   background: var(--bg-elevated);
   border: 1px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  cursor: pointer;
   transition: background 0.15s ease, border-color 0.15s ease;
-  gap: 4px;
+  gap: 0;
 }
 
 .repo-card:hover {
   background: var(--bg-hover);
   border-color: var(--text-muted);
+}
+
+.repo-card-inner {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 16px 20px;
+  cursor: pointer;
+  gap: 4px;
+  border: none;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  min-width: 0;
+}
+
+.repo-card-delete {
+  flex-shrink: 0;
+  align-self: center;
+  margin-right: 8px;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.repo-card:hover .repo-card-delete {
+  opacity: 0.7;
+}
+.repo-card-delete:hover {
+  opacity: 1 !important;
+  color: var(--danger);
+}
+.repo-card-delete .material-icons {
+  font-size: 20px;
 }
 
 .repo-card-title {
@@ -1005,6 +1074,27 @@ body.sidebar-hidden #toggleSidebarBtn {
   height: 14px;
   color: var(--text-muted);
   flex-shrink: 0;
+}
+
+.repo-card-type-tag {
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.repo-card-type-git {
+  background: var(--accent-muted);
+  color: var(--accent);
+  border: 1px solid var(--accent);
+}
+
+.repo-card-type-local {
+  background: transparent;
+  border: 1px solid var(--border-subtle);
+  color: var(--text-secondary);
 }
 
 .repo-list-empty {

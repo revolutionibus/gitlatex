@@ -13,9 +13,12 @@
   <header id="home-toolbar" class="home-toolbar" role="toolbar">
     <div class="toolbar-left">
       <img src="/favicon.svg" alt="" class="home-brand-icon" width="28" height="28">
-      <span class="home-app-name">GitLaTeX IDE</span>
+      <span class="home-app-name"><span class="app-name-git">Git</span><span class="app-name-latex">LaTeX</span> IDE</span>
     </div>
     <div class="toolbar-right">
+      <button type="button" class="icon-btn" id="open-create-workspace-modal-btn" aria-label="Create new folder" title="Create new folder (local only)">
+        <span class="material-icons">create_new_folder</span>
+      </button>
       <button type="button" class="icon-btn" id="open-clone-modal-btn" aria-label="Clone from URL" title="Clone from URL">
         <span class="material-icons">account_tree</span>
       </button>
@@ -25,7 +28,28 @@
     </div>
   </header>
   <main class="home-content">
-    <p class="home-subtitle">Clone a repo or open an existing one to start editing.</p>
+    <p class="home-subtitle">Clone a repo, create a local folder, or open an existing one to start editing.</p>
+
+  <!-- Create new folder (workspace) modal -->
+  <div id="create-workspace-modal" class="modal-overlay hidden" aria-hidden="true">
+    <div class="modal" role="dialog" aria-labelledby="create-workspace-modal-title" aria-modal="true">
+      <div class="modal-header">
+        <h2 id="create-workspace-modal-title">New folder</h2>
+        <button type="button" class="modal-close" onclick="closeCreateWorkspaceModal()" aria-label="Close">
+          <span class="material-icons">close</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <label for="new-workspace-name">Folder name</label>
+        <p class="settings-hint">Creates a local folder only. No Git. Use Clone to get a Git repo.</p>
+        <input id="new-workspace-name" type="text" placeholder="my-project" aria-label="Folder name" autocomplete="off">
+        <div class="modal-actions">
+          <button type="button" class="btn-toolbar" onclick="closeCreateWorkspaceModal()">Cancel</button>
+          <button type="button" class="btn-toolbar primary" id="create-workspace-submit">Create</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Clone from URL modal -->
   <div id="clone-modal" class="modal-overlay hidden" aria-hidden="true">
@@ -110,10 +134,12 @@
           <span class="btn-compile-text">Compile</span>
         </button>
       <button type="button" onclick="showCompileErrors()">Errors</button>
-      <button type="button" onclick="showStatus()">Status</button>
-      <button type="button" onclick="showDiff()">Diff</button>
-      <button type="button" onclick="commit()">Commit</button>
-      <button type="button" onclick="pushChanges()">Push</button>
+      <span class="toolbar-git" id="toolbar-git">
+        <button type="button" onclick="showStatus()">Status</button>
+        <button type="button" onclick="showDiff()">Diff</button>
+        <button type="button" onclick="commit()">Commit</button>
+        <button type="button" onclick="pushChanges()">Push</button>
+      </span>
     </div>
   </header>
 

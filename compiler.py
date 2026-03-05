@@ -1,62 +1,27 @@
-from flask import Flask, request, jsonify, make_response
+from flask import Flask, request, jsonify
 from flask_cors import CORS
-import json
 import os
 import base64
 import subprocess
 import tempfile
 import shutil
-import time
 
 app = Flask(__name__)
 
-# Optional API key: set COMPILER_API_KEY env to require Authorization: Bearer <key> or X-API-Key: <key>
 COMPILER_API_KEY = os.environ.get("COMPILER_API_KEY", "").strip()
-
-try:
-    from chessbot_api import chessbot_bp
-    from chesscom import chesscom_bp
-    app.register_blueprint(chessbot_bp, url_prefix="/chessbot")
-    app.register_blueprint(chesscom_bp, url_prefix="/chesscom")
-except ImportError:
-    pass  # Run as standalone LaTeX compiler (e.g. in gitlatex)
 
 CORS(
     app,
     resources={
         r"/*": {
-            "origins": [
-                "http://127.0.0.1:5500",
-                "http://127.0.0.1:5501",
-                "http://localhost:3000",
-                "http://localhost:5173",
-                "https://latex.itcpr.org",
-                "https://www.latex.itcpr.org",
-                "https://abdussamiakanda.web.app",
-                "https://chessbd.web.app",
-                "https://chessbd.app",
-                "https://www.chessbd.app"
-            ],
+            "origins": ["*"],
             "methods": ["GET", "POST", "OPTIONS"],
-            "allow_headers": ["Content-Type", "Accept", "X-API-Key", "Authorization", "Cache-Control", "Access-Control-Allow-Origin"],
-            "max_age": 86400,            # <-- cache preflight for 24h
-            "supports_credentials": False
+            "allow_headers": ["Content-Type", "Accept", "X-API-Key", "Authorization"],
         }
-    }
+    },
 )
 
-@app.after_request
-def add_timing_header(resp):
-    # set in each handler: g._t0 = time.perf_counter()
-    try:
-        dur = (getattr(request, "_t0", None) or time.perf_counter())  # fallback
-        resp.headers["X-Analysis-Ms"] = str(int((time.perf_counter() - dur)*1000))
-    except Exception:
-        pass
-    return resp
-
 def _check_api_key():
-    """If COMPILER_API_KEY is set, require a matching Bearer or X-API-Key header. Return (None, None) if ok, else (response, status)."""
     if not COMPILER_API_KEY:
         return None, None
     auth = request.headers.get("Authorization")
@@ -71,67 +36,87 @@ def _check_api_key():
     return None, None
 
 
-def _safe_main_basename(main):
-    """Ensure main is a safe .tex filename (no path traversal)."""
+def _safe_main_path(main):
     if not main or not isinstance(main, str):
         return "main.tex"
-    name = os.path.basename(main).strip()
-    if not name.endswith(".tex"):
-        name = name + ".tex" if name else "main.tex"
-    # Only allow alphanumeric, dash, underscore in stem
-    stem, ext = os.path.splitext(name)
-    if not stem.replace("-", "").replace("_", "").isalnum():
+    p = main.strip().replace("\\", "/").lstrip("/")
+    if ".." in p or not p:
         return "main.tex"
-    return name
+    if not p.endswith(".tex"):
+        p = p + ".tex" if p else "main.tex"
+    for part in p.split("/"):
+        stem, _ = os.path.splitext(part)
+        if stem and not all(c.isalnum() or c in "-_" for c in stem):
+            return "main.tex"
+    return p
 
 
-@app.route('/compile', methods=['POST'])
+def _safe_rel_path(rel):
+    if not rel or not isinstance(rel, str):
+        return None
+    p = rel.strip().replace("\\", "/").lstrip("/")
+    if ".." in p:
+        return None
+    return p
+
+
+@app.route("/compile", methods=["POST"])
 def compile_latex():
-    """
-    GitLaTeX-compatible compile endpoint.
-    Request: JSON { main: "main.tex", content: "<tex>", bibliography?: "<bib>", figures?: [{name, data}] }
-    Response: JSON { success: true, pdf: "data:application/pdf;base64,..." } or { error: "..." }
-    """
-    request._t0 = time.perf_counter()
     err_resp, err_status = _check_api_key()
     if err_resp is not None:
         return err_resp, err_status
     temp_dir = None
     try:
         data = request.json or {}
-        # GitLaTeX app sends { main, content }; support legacy content-only
-        main_file = _safe_main_basename(data.get("main") or "main.tex")
+        main_file = _safe_main_path(data.get("main") or "main.tex")
+        files = data.get("files") or []
         main_content = data.get("content")
         bib_content = data.get("bibliography")
         figures = data.get("figures", [])
 
-        if not main_content:
+        if files:
+            if not any(f.get("path") and (f.get("content") is not None or f.get("base64")) for f in files):
+                return jsonify({"error": "No file contents in 'files'"}), 400
+        elif not main_content:
             return jsonify({"error": "No content provided"}), 400
 
-        stem = os.path.splitext(main_file)[0]
+        stem = os.path.splitext(main_file)[0].replace("/", os.sep)
         temp_dir = tempfile.mkdtemp()
 
         try:
-            figures_dir = os.path.join(temp_dir, "figures")
-            os.makedirs(figures_dir, exist_ok=True)
-
-            tex_path = os.path.join(temp_dir, main_file)
-            with open(tex_path, "w", encoding="utf-8") as f:
-                f.write(main_content)
-
-            if bib_content:
-                bib_file = os.path.join(temp_dir, "bibliography.bib")
-                with open(bib_file, "w", encoding="utf-8") as f:
-                    f.write(bib_content)
-
-            for figure in figures:
-                figure_name = os.path.basename(figure.get("name") or "fig")
-                figure_data = figure.get("data") or ""
-                if "," in figure_data:
-                    figure_data = figure_data.split(",", 1)[1]
-                figure_path = os.path.join(figures_dir, figure_name)
-                with open(figure_path, "wb") as f:
-                    f.write(base64.b64decode(figure_data))
+            if files:
+                for entry in files:
+                    rel = _safe_rel_path(entry.get("path"))
+                    if rel is None:
+                        continue
+                    full = os.path.join(temp_dir, rel.replace("/", os.sep))
+                    dirname = os.path.dirname(full)
+                    if dirname:
+                        os.makedirs(dirname, exist_ok=True)
+                    if "base64" in entry:
+                        with open(full, "wb") as f:
+                            f.write(base64.b64decode(entry["base64"] or ""))
+                    else:
+                        with open(full, "w", encoding="utf-8") as f:
+                            f.write(entry.get("content") or "")
+            else:
+                figures_dir = os.path.join(temp_dir, "figures")
+                os.makedirs(figures_dir, exist_ok=True)
+                tex_path = os.path.join(temp_dir, main_file)
+                with open(tex_path, "w", encoding="utf-8") as f:
+                    f.write(main_content)
+                if bib_content:
+                    bib_file = os.path.join(temp_dir, "bibliography.bib")
+                    with open(bib_file, "w", encoding="utf-8") as f:
+                        f.write(bib_content)
+                for figure in figures:
+                    figure_name = os.path.basename(figure.get("name") or "fig")
+                    figure_data = figure.get("data") or ""
+                    if "," in figure_data:
+                        figure_data = figure_data.split(",", 1)[1]
+                    figure_path = os.path.join(figures_dir, figure_name)
+                    with open(figure_path, "wb") as f:
+                        f.write(base64.b64decode(figure_data))
 
             def run_command(cmd, error_msg):
                 process = subprocess.run(
@@ -152,37 +137,22 @@ def compile_latex():
                 return process
 
             run_command(
-                [
-                    "pdflatex",
-                    "-shell-escape",
-                    "-interaction=nonstopmode",
-                    "-file-line-error",
-                    main_file,
-                ],
+                ["pdflatex", "-shell-escape", "-interaction=nonstopmode", "-file-line-error", main_file],
                 "First LaTeX pass failed",
             )
 
-            if bib_content:
+            has_bib = bool(bib_content) or any(
+                (f.get("path") or "").lower().endswith(".bib") for f in files
+            )
+            if has_bib:
                 run_command(["bibtex", stem], "BibTeX compilation failed")
 
             run_command(
-                [
-                    "pdflatex",
-                    "-shell-escape",
-                    "-interaction=nonstopmode",
-                    "-file-line-error",
-                    main_file,
-                ],
+                ["pdflatex", "-shell-escape", "-interaction=nonstopmode", "-file-line-error", main_file],
                 "Second LaTeX pass failed",
             )
             run_command(
-                [
-                    "pdflatex",
-                    "-shell-escape",
-                    "-interaction=nonstopmode",
-                    "-file-line-error",
-                    main_file,
-                ],
+                ["pdflatex", "-shell-escape", "-interaction=nonstopmode", "-file-line-error", main_file],
                 "Final LaTeX pass failed",
             )
 
@@ -215,14 +185,5 @@ def compile_latex():
                 pass
 
 
-@app.route('/')
-def home():
-    return jsonify({
-        'status': 'running',
-        'endpoints': [
-            '/compile - Latex compiler'
-        ]
-    })
-
-if __name__ == '__main__':
+if __name__ == "__main__":
     app.run(debug=True)
