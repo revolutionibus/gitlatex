@@ -1,4 +1,17 @@
 repos/
-reops/*
 node_modules/
 node_modules/*
+
+# PyPI secret (never commit)
+.pypirc
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+dist/
+build/
+*.egg
+
+pypirc.example

@@ -4,7 +4,8 @@
   <title>GitLaTeX IDE</title>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
   <link rel="stylesheet" href="https://fonts.googleapis.com/icon?family=Material+Icons" />
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="/style.css" />
 </head>
 <body>
 
@@ -130,16 +131,23 @@
     </div>
     <div class="toolbar-right">
       <button type="button" class="primary" id="btn-compile" onclick="compile()">
-          <span class="material-icons btn-compile-icon" aria-hidden="true">build</span>
+          <span class="material-icons btn-compile-icon" aria-hidden="true">play_arrow</span>
           <span class="btn-compile-text">Compile</span>
         </button>
-      <button type="button" onclick="showCompileErrors()">Errors</button>
-      <span class="toolbar-git" id="toolbar-git">
-        <button type="button" onclick="showStatus()">Status</button>
-        <button type="button" onclick="showDiff()">Diff</button>
-        <button type="button" onclick="commit()">Commit</button>
-        <button type="button" onclick="pushChanges()">Push</button>
-      </span>
+      <button type="button" class="btn-errors" onclick="showCompileErrors()"><span class="material-icons" aria-hidden="true">error_outline</span><span>Errors</span></button>
+      <div class="toolbar-git git-dropdown" id="toolbar-git">
+        <button type="button" class="git-dropdown-btn" id="git-dropdown-btn" aria-haspopup="true" aria-expanded="false" aria-label="Git actions">
+          <i class="fa-brands fa-git-alt" aria-hidden="true"></i>
+          <span>Git</span>
+          <span class="material-icons git-dropdown-arrow" aria-hidden="true">arrow_drop_down</span>
+        </button>
+        <div class="git-dropdown-menu" id="git-dropdown-menu" role="menu" aria-hidden="true">
+          <button type="button" role="menuitem" onclick="showStatus(); closeGitDropdown();"><span class="material-icons git-dropdown-menu-icon" aria-hidden="true">info</span><span>Status</span></button>
+          <button type="button" role="menuitem" onclick="showDiff(); closeGitDropdown();"><span class="material-icons git-dropdown-menu-icon" aria-hidden="true">code</span><span>Diff</span></button>
+          <button type="button" role="menuitem" onclick="commit(); closeGitDropdown();"><span class="material-icons git-dropdown-menu-icon" aria-hidden="true">commit</span><span>Commit</span></button>
+          <button type="button" role="menuitem" onclick="pushChanges(); closeGitDropdown();"><span class="material-icons git-dropdown-menu-icon" aria-hidden="true">cloud_upload</span><span>Push</span></button>
+        </div>
+      </div>
     </div>
   </header>
 
@@ -226,6 +234,6 @@
   </div>
 
 <script src="https://unpkg.com/monaco-editor@latest/min/vs/loader.js"></script>
-<script src="app.js"></script>
+<script src="/app.js"></script>
 </body>
 </html>

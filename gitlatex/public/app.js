@@ -3,12 +3,11 @@ const THEME_KEY = "gitlatex-theme";
 const STORAGE_COMPILER_API_URL = "gitlatex-compiler-api";
 const STORAGE_COMPILER_API_KEY = "gitlatex-compiler-api-key";
 
-/** API base URL: same origin, or http://localhost:3000 when on file:// or another port. */
+/** API base URL: "" = same origin (API on same host:port as page). Fallback only for file:// or no origin. */
 function getApiBase() {
-  if (typeof window === "undefined" || !window.location) return "http://localhost:3000";
+  if (typeof window === "undefined" || !window.location) return "http://localhost:5000";
   const o = window.location.origin;
-  if (!o || o.startsWith("file")) return "http://localhost:3000";
-  if (o.includes("localhost") && !o.endsWith(":3000")) return "http://localhost:3000";
+  if (!o || o.startsWith("file")) return "http://localhost:5000";
   return "";
 }
 const API_BASE = getApiBase();
@@ -186,8 +185,8 @@ async function fetchJson(url, options) {
   const res = await fetchApi(url, options);
   const text = await res.text();
   if (text.trimStart().startsWith("<")) {
-    const hint = (typeof API_BASE !== "undefined" && API_BASE) ? API_BASE : (typeof window !== "undefined" && window.location && window.location.origin) ? window.location.origin : "http://localhost:3000";
-    return { error: "Server returned an error page (status " + res.status + "). Is the backend running at " + hint + "?" };
+    const hint = (typeof API_BASE !== "undefined" && API_BASE) ? API_BASE : (typeof window !== "undefined" && window.location && window.location.origin) ? window.location.origin : "http://localhost:5000";
+    return { error: "Server returned an error page (status " + res.status + "). Is the backend running at " + (hint || "http://localhost:5000") + "?" };
   }
   try {
     return JSON.parse(text);
@@ -398,20 +397,22 @@ async function loadRepoList() {
       }
       if (owner) addMetaItem("person", owner, "Owner");
       if (createdAt) {
-        try {
-          const short = new Date(createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        const createdDate = new Date(createdAt);
+        if (!isNaN(createdDate.getTime())) {
+          const short = createdDate.toLocaleDateString(undefined, { month: "short", day: "numeric" });
           addMetaItem("event", short, createdBy ? "Created " + short + " by " + createdBy : "Created " + short);
-        } catch (_) {}
+        }
       }
       if (lastModified) {
-        try {
-          const updated = new Date(lastModified).getTime();
-          const created = createdAt ? new Date(createdAt).getTime() : 0;
-          if (updated >= created) {
-            const short = new Date(lastModified).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+        const modifiedDate = new Date(lastModified);
+        if (!isNaN(modifiedDate.getTime())) {
+          const createdDate = createdAt ? new Date(createdAt) : null;
+          const created = createdDate && !isNaN(createdDate.getTime()) ? createdDate.getTime() : 0;
+          if (modifiedDate.getTime() >= created) {
+            const short = modifiedDate.toLocaleDateString(undefined, { month: "short", day: "numeric" });
             addMetaItem("update", short, "Updated " + short);
           }
-        } catch (_) {}
+        }
       }
       if (fileCount != null && fileCount > 0) addMetaItem("folder", fileCount === 1 ? "1 file" : fileCount + " files", null);
       if (meta.children.length) cardInner.appendChild(meta);
@@ -1328,22 +1329,45 @@ async function compile() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ main: mainFile })
       });
-      const data = await res.json();
+      let data = {};
+      try {
+        const text = await res.text();
+        data = text ? JSON.parse(text) : {};
+      } catch (_) {
+        setConsole("Compile failed: Server returned invalid JSON (status " + res.status + "). Is the backend running?");
+        return;
+      }
       if (data.success && data.pdf) {
-        document.getElementById("pdf").src = (typeof API_BASE !== "undefined" ? API_BASE : "") + data.pdf;
+        document.getElementById("pdf").src = (getApiBase() || "") + data.pdf;
         setConsole("Compiled " + mainFile + " successfully.");
       } else if (data.error) {
         setConsole("Compile error:\n" + data.error);
+      } else {
+        setConsole("Compile failed: " + (res.statusText || res.status || "Unknown error"));
       }
     }
   } catch (e) {
-    setConsole("Compile failed: " + (e.message || ""));
+    const hint = (typeof window !== "undefined" && window.location && window.location.origin) ? window.location.origin : "http://localhost:5000";
+    setConsole("Compile failed: " + (e.message || "Network error") + ". Check that a repo is selected and the server is running at " + hint + ".");
   } finally {
     setCompileLoading(false);
   }
 }
 
+function ensureConsoleVisible() {
+  const view = document.getElementById("editor-view");
+  if (!view || !view.classList.contains("console-hidden")) return;
+  view.classList.remove("console-hidden");
+  localStorage.setItem(STORAGE_KEYS.consoleVisible, "true");
+  const consoleToggle = document.getElementById("console-toggle");
+  if (consoleToggle) {
+    consoleToggle.setAttribute("title", "Hide console");
+    consoleToggle.setAttribute("aria-label", "Hide console");
+  }
+}
+
 async function showCompileErrors() {
+  ensureConsoleVisible();
   try {
     const res = await fetchApi("/compile-error");
     const data = await res.json();
@@ -1386,6 +1410,7 @@ async function pushChanges() {
 }
 
 async function showStatus() {
+  ensureConsoleVisible();
   try {
     const res = await fetchApi("/status");
     const data = await res.json();
@@ -1396,6 +1421,7 @@ async function showStatus() {
 }
 
 async function showDiff() {
+  ensureConsoleVisible();
   try {
     const res = await fetchApi("/diff");
     const data = await res.json();
@@ -1403,6 +1429,48 @@ async function showDiff() {
   } catch (e) {
     setConsole("Error: " + (e.message || ""));
   }
+}
+
+function closeGitDropdown() {
+  const wrapper = document.getElementById("toolbar-git");
+  const btn = document.getElementById("git-dropdown-btn");
+  const menu = document.getElementById("git-dropdown-menu");
+  if (menu && menu.parentNode === document.body) {
+    if (wrapper) wrapper.appendChild(menu);
+    menu.style.position = "";
+    menu.style.top = "";
+    menu.style.left = "";
+    menu.style.right = "";
+    menu.style.minWidth = "";
+    menu.style.display = "";
+  }
+  if (wrapper) wrapper.classList.remove("open");
+  if (btn) btn.setAttribute("aria-expanded", "false");
+  if (menu) menu.setAttribute("aria-hidden", "true");
+}
+
+function toggleGitDropdown(e) {
+  e.stopPropagation();
+  const wrapper = document.getElementById("toolbar-git");
+  const btn = document.getElementById("git-dropdown-btn");
+  const menu = document.getElementById("git-dropdown-menu");
+  const wasOpen = wrapper && wrapper.classList.contains("open");
+  if (wasOpen) {
+    closeGitDropdown();
+    return;
+  }
+  if (!wrapper || !btn || !menu) return;
+  const rect = btn.getBoundingClientRect();
+  menu.style.position = "fixed";
+  menu.style.top = (rect.bottom + 4) + "px";
+  menu.style.left = "auto";
+  menu.style.right = (window.innerWidth - rect.right) + "px";
+  menu.style.minWidth = Math.max(rect.width, 140) + "px";
+  menu.style.display = "block";
+  document.body.appendChild(menu);
+  wrapper.classList.add("open");
+  btn.setAttribute("aria-expanded", "true");
+  menu.setAttribute("aria-hidden", "false");
 }
 
 // ----- Resizable panels -----
@@ -1592,8 +1660,18 @@ document.getElementById("clone-modal")?.addEventListener("click", function (e) {
   if (e.target === this) closeCloneModal();
 });
 
+document.getElementById("git-dropdown-btn")?.addEventListener("click", toggleGitDropdown);
+document.addEventListener("click", function (e) {
+  if (!e.target.closest(".toolbar-git.git-dropdown")) closeGitDropdown();
+});
+
 document.addEventListener("keydown", function (e) {
   if (e.key === "Escape") {
+    const gitWrapper = document.getElementById("toolbar-git");
+    if (gitWrapper && gitWrapper.classList.contains("open")) {
+      closeGitDropdown();
+      return;
+    }
     const createModal = document.getElementById("create-workspace-modal");
     if (createModal && !createModal.classList.contains("hidden")) closeCreateWorkspaceModal();
     else {

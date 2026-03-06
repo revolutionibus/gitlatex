@@ -254,6 +254,16 @@ body.sidebar-hidden #toggleSidebarBtn {
   height: 18px;
   margin-right: 6px;
 }
+#topbar button.btn-errors {
+  display: inline-flex;
+  align-items: center;
+}
+#topbar button.btn-errors .material-icons:first-child {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  margin-right: 6px;
+}
 #topbar button.primary.loading {
   pointer-events: none;
   opacity: 0.85;
@@ -1285,6 +1295,93 @@ body.sidebar-hidden #toggleSidebarBtn {
   color: var(--text-primary);
   margin-left: 4px;
   padding: 0 8px;
+}
+
+/* Git dropdown in toolbar */
+.toolbar-git.git-dropdown {
+  position: relative;
+  display: inline-flex;
+}
+.toolbar-git .git-dropdown-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--accent-hover) !important;
+  border: 1px solid var(--accent-hover) !important;
+}
+.toolbar-git .git-dropdown-btn .material-icons:first-child,
+.toolbar-git .git-dropdown-btn .fa-git-alt {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+}
+.toolbar-git .git-dropdown-arrow {
+  font-size: 20px;
+  width: 20px;
+  height: 20px;
+  margin-left: 2px;
+}
+/* Menu when attached to toolbar (hidden); position/display overridden when moved to body */
+.toolbar-git .git-dropdown-menu {
+  position: absolute;
+  top: 100%;
+  right: 0;
+  margin-top: 4px;
+  min-width: 140px;
+  padding: 4px 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: 8px;
+  box-shadow: var(--shadow-md);
+  z-index: 1000;
+  display: none;
+}
+.toolbar-git.git-dropdown.open .git-dropdown-menu {
+  display: block;
+}
+
+/* Standalone menu styles (apply when menu is in body so it still looks correct) */
+.git-dropdown-menu {
+  min-width: 140px;
+  padding: 4px 0;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md);
+  z-index: 1000;
+  font-family: var(--font-sans);
+}
+.git-dropdown-menu button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  text-align: left;
+  padding: 8px 14px;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-sizing: border-box;
+}
+.git-dropdown-menu .git-dropdown-menu-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+}
+.git-dropdown-menu button:hover {
+  background: var(--bg-hover);
+}
+.git-dropdown-menu button:hover .git-dropdown-menu-icon {
+  color: var(--text-primary);
+}
+.git-dropdown-menu button:first-child {
+  margin-top: 0;
 }
 
 /* --- Fonts --- */
