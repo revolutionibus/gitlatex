@@ -1081,7 +1081,7 @@ body.sidebar-hidden #toggleSidebarBtn {
   font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  padding: 2px 6px;
+  padding: 0 6px;
   border-radius: 4px;
 }
 
