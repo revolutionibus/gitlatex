@@ -164,6 +164,42 @@ function populateSettings() {
   if (input) input.value = getStoredCompilerApi();
   const keyInput = document.getElementById("settings-compiler-api-key");
   if (keyInput) keyInput.value = getStoredCompilerApiKey();
+  populateSettingsTechInfo();
+}
+
+function setInfoLink(el, url, label) {
+  if (!el) return;
+  if (url) {
+    el.innerHTML = "";
+    const a = document.createElement("a");
+    a.href = url;
+    a.target = "_blank";
+    a.rel = "noopener noreferrer";
+    a.textContent = label || url;
+    a.className = "settings-info-link";
+    el.appendChild(a);
+  } else {
+    el.textContent = "—";
+  }
+}
+
+async function populateSettingsTechInfo() {
+  const versionEl = document.getElementById("settings-info-version");
+  const urlEl = document.getElementById("settings-info-url");
+  const repoEl = document.getElementById("settings-info-repo");
+  const pypiEl = document.getElementById("settings-info-pypi");
+  if (urlEl && typeof window !== "undefined" && window.location) urlEl.textContent = window.location.origin;
+  try {
+    const res = await fetchApi("/api/info");
+    const data = await res.json().catch(() => ({}));
+    if (versionEl) versionEl.textContent = data.version || "—";
+    setInfoLink(repoEl, data.repository, data.repository ? data.repository.replace(/^https?:\/\//, "") : "");
+    setInfoLink(pypiEl, data.pypi, "pypi.org/project/gitlatex");
+  } catch (_) {
+    if (versionEl) versionEl.textContent = "—";
+    if (repoEl) repoEl.textContent = "—";
+    if (pypiEl) pypiEl.textContent = "—";
+  }
 }
 
 function setConsole(text) {
@@ -433,10 +469,14 @@ async function loadRepoList() {
       listEl.appendChild(card);
     });
     if (emptyEl) emptyEl.classList.toggle("hidden", items.length > 0);
+    const subtitleEl = document.getElementById("home-subtitle");
+    if (subtitleEl) subtitleEl.classList.toggle("hidden", items.length > 0);
   } catch (e) {
     listEl.innerHTML = "";
     if (emptyEl) {
-      emptyEl.textContent = "Could not load repositories.";
+      const textEl = emptyEl.querySelector(".repo-list-empty-text");
+      if (textEl) textEl.textContent = "Could not load repositories.";
+      else emptyEl.textContent = "Could not load repositories.";
       emptyEl.classList.remove("hidden");
     }
   }
@@ -531,7 +571,15 @@ async function cloneRepoAndRefresh() {
     alert("Enter a repository URL.");
     return;
   }
+  const btn = document.getElementById("clone-repo-btn");
+  const textEl = btn && btn.querySelector(".clone-btn-text");
+  const originalText = textEl ? textEl.textContent : "Clone";
   try {
+    if (btn) {
+      btn.disabled = true;
+      btn.classList.add("loading");
+      if (textEl) textEl.textContent = "Cloning…";
+    }
     const res = await fetchApi("/clone", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -549,6 +597,12 @@ async function cloneRepoAndRefresh() {
     openEditor(name);
   } catch (e) {
     alert("Clone failed: " + (e.message || "Network error"));
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.classList.remove("loading");
+      if (textEl) textEl.textContent = originalText;
+    }
   }
 }
 

@@ -21,7 +21,7 @@
         <span class="material-icons">create_new_folder</span>
       </button>
       <button type="button" class="icon-btn" id="open-clone-modal-btn" aria-label="Clone from URL" title="Clone from URL">
-        <span class="material-icons">account_tree</span>
+        <i class="fa-brands fa-git-alt" aria-hidden="true"></i>
       </button>
       <a href="#/settings" class="icon-btn" aria-label="Settings" title="Settings">
         <span class="material-icons">settings</span>
@@ -29,7 +29,7 @@
     </div>
   </header>
   <main class="home-content">
-    <p class="home-subtitle">Clone a repo, create a local folder, or open an existing one to start editing.</p>
+    <p class="home-subtitle" id="home-subtitle">Clone a repo, create a local folder, or open an existing one to start editing.</p>
 
   <!-- Create new folder (workspace) modal -->
   <div id="create-workspace-modal" class="modal-overlay hidden" aria-hidden="true">
@@ -65,7 +65,7 @@
         <label for="repoUrl">Repository URL</label>
         <div class="clone-row">
           <input id="repoUrl" type="text" placeholder="https://github.com/user/repo.git" aria-label="Repository URL">
-          <button type="button" class="btn-toolbar primary" onclick="cloneRepoAndRefresh()">Clone</button>
+          <button type="button" class="btn-toolbar primary" id="clone-repo-btn" onclick="cloneRepoAndRefresh()"><span class="clone-btn-text">Clone</span></button>
         </div>
       </div>
     </div>
@@ -74,7 +74,10 @@
     <section class="home-repos">
       <h2>Your repositories</h2>
       <div id="repo-list" class="repo-list"></div>
-      <p id="repo-list-empty" class="repo-list-empty hidden">No repositories yet. Clone one above.</p>
+      <div id="repo-list-empty" class="repo-list-empty hidden" role="status">
+        <span class="material-icons repo-list-empty-icon" aria-hidden="true">folder_off</span>
+        <p class="repo-list-empty-text">No repositories yet. Create or clone one above.</p>
+      </div>
     </section>
   </main>
 </div>
@@ -112,6 +115,16 @@
         <label class="settings-label" for="settings-compiler-api-key">API key</label>
         <p class="settings-hint">Optional. Sent as <code>Authorization: Bearer &lt;key&gt;</code> when calling the compiler API.</p>
         <input type="password" id="settings-compiler-api-key" class="settings-input" placeholder="Your API key" autocomplete="off">
+      </div>
+      <div class="settings-group settings-group-stack settings-tech-info">
+        <label class="settings-label">Technical info</label>
+        <dl class="settings-info-list">
+          <div class="settings-info-row"><dt>Version</dt><dd id="settings-info-version">—</dd></div>
+          <div class="settings-info-row"><dt>App URL</dt><dd id="settings-info-url">—</dd></div>
+          <div class="settings-info-row"><dt>Github</dt><dd id="settings-info-repo">—</dd></div>
+          <div class="settings-info-row"><dt>PyPI</dt><dd id="settings-info-pypi">—</dd></div>
+          <div class="settings-info-row"><dt>Developers</dt><dd id="settings-info-developers">Md Atiqur Rahman & Md Abdus Sami Akanda</dd></div>
+        </dl>
       </div>
     </section>
   </main>

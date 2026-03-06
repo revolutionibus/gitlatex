@@ -158,7 +158,8 @@ body.sidebar-hidden #toggleSidebarBtn {
   color: var(--text-primary);
 }
 
-.icon-btn .material-icons {
+.icon-btn .material-icons,
+.icon-btn .fa-git-alt {
   font-size: 22px;
   width: 22px;
   height: 22px;
@@ -903,6 +904,13 @@ body.sidebar-hidden #toggleSidebarBtn {
   background: var(--accent-hover);
   border-color: var(--accent-hover);
 }
+.btn-toolbar.loading {
+  pointer-events: none;
+  opacity: 0.85;
+}
+.btn-toolbar.primary.loading {
+  cursor: not-allowed;
+}
 
 .modal-actions {
   display: flex;
@@ -1118,13 +1126,36 @@ body.sidebar-hidden #toggleSidebarBtn {
 }
 
 .repo-list-empty {
-  color: var(--text-muted);
-  font-size: 14px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
   margin: 0;
-  padding: 24px 0;
+  padding: 48px 24px;
+  text-align: center;
+  background: var(--bg-hover);
+  border: 1px dashed var(--border-subtle);
+  border-radius: var(--radius-md);
 }
 
-.repo-list-empty.hidden {
+.repo-list-empty-icon {
+  font-size: 48px;
+  width: 48px;
+  height: 48px;
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+.repo-list-empty-text {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-secondary);
+  line-height: 1.5;
+}
+
+.repo-list-empty.hidden,
+.home-subtitle.hidden {
   display: none !important;
 }
 
@@ -1239,6 +1270,40 @@ body.sidebar-hidden #toggleSidebarBtn {
 .settings-input:focus {
   outline: none;
   border-color: var(--accent);
+}
+
+.settings-tech-info .settings-label {
+  margin-bottom: 4px;
+}
+.settings-info-list {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-secondary);
+}
+.settings-info-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 6px;
+}
+.settings-info-row:first-of-type { margin-top: 0; }
+.settings-info-list dt {
+  margin: 0;
+  font-weight: 600;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  min-width: 80px;
+}
+.settings-info-list dd {
+  margin: 0;
+  word-break: break-all;
+}
+.settings-info-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+.settings-info-link:hover {
+  text-decoration: underline;
 }
 
 .theme-options {

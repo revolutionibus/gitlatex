@@ -5,6 +5,7 @@ import base64
 import os
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import threading
@@ -36,8 +37,18 @@ from flask import Flask, Response, jsonify, request, send_file
 
 try:
     from git import Repo
+    try:
+        from git.util import rmtree as git_rmtree
+    except (ImportError, AttributeError):
+        git_rmtree = None
 except ImportError:
     Repo = None
+    git_rmtree = None
+
+try:
+    from gitlatex import __version__ as GITLATEX_VERSION
+except ImportError:
+    GITLATEX_VERSION = "?"
 
 ROOT_DIR = Path(__file__).resolve().parent
 
@@ -123,6 +134,16 @@ def serve_root():
 @app.route("/ping")
 def ping():
     return "pong"
+
+
+@app.route("/api/info")
+def api_info():
+    """Technical info for the Settings page."""
+    return jsonify(
+        version=GITLATEX_VERSION,
+        repository="https://github.com/abdussamiakanda/gitlatex/tree/feat/python-server",
+        pypi="https://pypi.org/project/gitlatex",
+    )
 
 
 @app.route("/")
@@ -289,6 +310,12 @@ def list_repos():
                         created_by = c.author.name if c.author else None
                 except Exception:
                     pass
+                finally:
+                    if getattr(repo, "close", None):
+                        try:
+                            repo.close()
+                        except Exception:
+                            pass
             except Exception:
                 pass
         repos.append({
@@ -303,6 +330,8 @@ def list_repos():
 @app.route("/delete-repo", methods=["POST"])
 def delete_repo():
     global current_repo_path
+    if not BASE_DIR or not os.path.isdir(BASE_DIR):
+        return jsonify(error="Repos directory not available"), 500
     data = _json()
     name = (data.get("name") or "").strip().lstrip("/\\")
     if not name:
@@ -310,21 +339,76 @@ def delete_repo():
     if ".." in name or os.path.isabs(name):
         return jsonify(error="Invalid repo name"), 400
     full_path = os.path.join(BASE_DIR, name)
-    real_base = os.path.realpath(BASE_DIR)
-    real_full = os.path.realpath(full_path)
-    if real_full != real_base and not real_full.startswith(real_base + os.sep):
-        return jsonify(error="Invalid repo name"), 400
     try:
         if not os.path.exists(full_path):
             return jsonify(error="Repository not found"), 404
         if not os.path.isdir(full_path):
             return jsonify(error="Not a directory"), 400
+        real_base = os.path.realpath(BASE_DIR)
+        real_full = os.path.realpath(full_path)
+        if real_full != real_base and not real_full.startswith(real_base + os.sep):
+            return jsonify(error="Invalid repo name"), 400
         if current_repo_path and os.path.realpath(current_repo_path) == real_full:
             current_repo_path = None
-        shutil.rmtree(full_path)
+
+        # GitPython's rmtree handles .git read-only files on Windows; use it when available.
+        if git_rmtree is not None:
+            try:
+                git_rmtree(full_path)
+                if not os.path.exists(full_path):
+                    print("Deleted repo:", name)
+                    return jsonify(success=True)
+            except Exception as e:
+                print("Delete repo (git_rmtree) failed:", name, e)
+
+        # On Windows, try subprocess first (no handle inheritance). If folder is locked by another
+        # process (Explorer, terminal, antivirus, etc.), subprocess will also fail.
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["cmd", "/c", "rmdir", "/s", "/q", full_path],
+                capture_output=True,
+                timeout=60,
+            )
+            if result.returncode == 0 and not os.path.exists(full_path):
+                print("Deleted repo:", name)
+                return jsonify(success=True)
+            err_text = (result.stderr or result.stdout or b"").decode("utf-8", errors="replace").strip()
+            if result.returncode != 0:
+                print("Delete repo (rmdir) failed:", name, err_text or result.returncode)
+                if "being used by another process" in err_text:
+                    return jsonify(
+                        error="Folder is in use by another program. Close any Explorer window, terminal, or app that has this folder open, then try again."
+                    ), 500
+
+        def _rmtree_onerror(func, path, exc_info):
+            try:
+                if os.path.isdir(path):
+                    os.chmod(path, stat.S_IRWXU)
+                else:
+                    os.chmod(path, stat.S_IWUSR | stat.S_IREAD)
+            except OSError:
+                pass
+            func(path)
+
+        shutil.rmtree(full_path, onerror=_rmtree_onerror)
+        if os.path.exists(full_path):
+            try:
+                os.chmod(full_path, stat.S_IRWXU)
+                os.rmdir(full_path)
+            except OSError as e:
+                print("Delete repo failed (root folder):", name, e)
+                return jsonify(error=str(e)), 500
         print("Deleted repo:", name)
         return jsonify(success=True)
+    except OSError as e:
+        print("Delete repo failed:", name, e)
+        if getattr(e, "winerror", None) == 32 or "being used by another process" in str(e):
+            return jsonify(
+                error="Folder is in use by another program. Close any Explorer window, terminal, or app that has this folder open, then try again."
+            ), 500
+        return jsonify(error=str(e)), 500
     except Exception as e:
+        print("Delete repo error:", name, e)
         return jsonify(error=str(e)), 500
 
 
@@ -728,10 +812,17 @@ def commit():
     message = data.get("message") or ""
     try:
         repo = Repo(current_repo_path)
-        repo.index.add("*")
-        repo.index.commit(message)
-        print("Commit:", (message or "")[:60])
-        return jsonify(success=True)
+        try:
+            repo.index.add("*")
+            repo.index.commit(message)
+            print("Commit:", (message or "")[:60])
+            return jsonify(success=True)
+        finally:
+            if getattr(repo, "close", None):
+                try:
+                    repo.close()
+                except Exception:
+                    pass
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -744,9 +835,16 @@ def push():
         return jsonify(error="GitPython not installed"), 500
     try:
         repo = Repo(current_repo_path)
-        repo.remotes.origin.push()
-        print("Pushed to origin")
-        return jsonify(success=True)
+        try:
+            repo.remotes.origin.push()
+            print("Pushed to origin")
+            return jsonify(success=True)
+        finally:
+            if getattr(repo, "close", None):
+                try:
+                    repo.close()
+                except Exception:
+                    pass
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -759,13 +857,20 @@ def status():
         return jsonify(error="GitPython not installed"), 500
     try:
         repo = Repo(current_repo_path)
-        status_dict = {
-            "current": repo.head.ref.name if not repo.head.is_detached else None,
-            "modified": [item.a_path for item in repo.index.diff(None)],
-            "staged": [item.a_path for item in repo.index.diff("HEAD")],
-            "untracked": repo.untracked_files,
-        }
-        return jsonify(status=status_dict)
+        try:
+            status_dict = {
+                "current": repo.head.ref.name if not repo.head.is_detached else None,
+                "modified": [item.a_path for item in repo.index.diff(None)],
+                "staged": [item.a_path for item in repo.index.diff("HEAD")],
+                "untracked": repo.untracked_files,
+            }
+            return jsonify(status=status_dict)
+        finally:
+            if getattr(repo, "close", None):
+                try:
+                    repo.close()
+                except Exception:
+                    pass
     except Exception as e:
         return jsonify(error=str(e)), 500
 
@@ -778,8 +883,15 @@ def diff():
         return jsonify(error="GitPython not installed"), 500
     try:
         repo = Repo(current_repo_path)
-        diff_text = repo.git.diff()
-        return jsonify(diff=diff_text)
+        try:
+            diff_text = repo.git.diff()
+            return jsonify(diff=diff_text)
+        finally:
+            if getattr(repo, "close", None):
+                try:
+                    repo.close()
+                except Exception:
+                    pass
     except Exception as e:
         return jsonify(error=str(e)), 500
 
