@@ -9,6 +9,14 @@ const app = express();
 // Allow large payloads when sending full repo to external compiler
 app.use(bodyParser.json({ limit: "50mb" }));
 
+// Request logging (skip static assets to reduce noise)
+app.use((req, res, next) => {
+  const ext = path.extname(req.path);
+  const isStatic = ext && [".css", ".js", ".html", ".ico", ".png", ".jpg", ".svg", ".woff", ".woff2"].includes(ext);
+  if (!isStatic) console.log(`${req.method} ${req.path}`);
+  next();
+});
+
 const BASE_DIR = path.join(__dirname, "repos");
 
 const MIME_TYPES = {
@@ -133,6 +141,7 @@ app.post("/delete-repo", (req, res) => {
     if (!fs.statSync(fullPath).isDirectory()) return res.status(400).json({ error: "Not a directory" });
     if (currentRepoPath && path.resolve(currentRepoPath) === realFull) currentRepoPath = null;
     fs.rmSync(fullPath, { recursive: true });
+    console.log("Deleted repo:", name);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -152,6 +161,7 @@ app.post("/create-workspace", (req, res) => {
       return res.status(400).json({ error: "A folder with that name already exists" });
     }
     fs.mkdirSync(fullPath, { recursive: true });
+    console.log("Created workspace:", name);
     res.json({ success: true, name });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -173,6 +183,7 @@ app.post("/select-repo", (req, res) => {
   currentRepoPath = repoPath;
   const gitDir = path.join(repoPath, ".git");
   const hasGit = fs.existsSync(gitDir) && fs.statSync(gitDir).isDirectory();
+  console.log("Selected repo:", name);
   res.json({ success: true, hasGit });
 });
 
@@ -184,9 +195,11 @@ app.post("/clone", async (req, res) => {
 
   const repoName = repoUrl.split("/").pop().replace(".git", "");
   const repoPath = path.join(BASE_DIR, repoName);
+  console.log("Cloning", repoUrl, "->", repoName);
 
   try {
     await simpleGit().clone(repoUrl, repoPath);
+    console.log("Cloned", repoName);
     currentRepoPath = repoPath;
     res.json({ success: true });
   } catch (err) {
@@ -315,6 +328,7 @@ app.post("/save", (req, res) => {
   }
   const filePath = path.join(currentRepoPath, req.body.path);
   fs.writeFileSync(filePath, req.body.content);
+  console.log("Saved", req.body.path);
   res.json({ success: true });
 });
 
@@ -369,6 +383,7 @@ app.post("/create-file", (req, res) => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     const content = req.body.content != null ? req.body.content : "";
     fs.writeFileSync(fullPath, content);
+    console.log("Created file", relativePath);
     res.json({ success: true, path: relativePath });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -391,6 +406,7 @@ app.post("/create-folder", (req, res) => {
       return res.status(400).json({ error: "Path already exists" });
     }
     fs.mkdirSync(fullPath, { recursive: true });
+    console.log("Created folder", relativePath);
     res.json({ success: true, path: relativePath });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -460,6 +476,7 @@ app.post("/delete", (req, res) => {
     } else {
       fs.unlinkSync(fullPath);
     }
+    console.log("Deleted", relativePath);
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -504,16 +521,19 @@ app.post("/compile", (req, res) => {
     return res.status(400).json({ error: "No repository selected" });
   }
   const mainFile = req.body.main || "main.tex";
+  console.log("Compiling", mainFile, "...");
 
   exec(`pdflatex -interaction=nonstopmode ${mainFile}`, {
     cwd: currentRepoPath
   }, (err, stdout, stderr) => {
     if (err) {
       lastCompileError = stderr || stdout || err.message;
+      console.log("Compile failed:", mainFile);
       return res.status(500).json({ error: lastCompileError });
     }
 
     lastCompileError = null;
+    console.log("Compiled", mainFile);
 
     res.json({
       success: true,
@@ -556,6 +576,7 @@ function handleSavePdf(req, res) {
     const dir = path.dirname(fullPath);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(fullPath, buf);
+    console.log("Saved PDF", relativePath);
     res.json({ success: true, path: relativePath });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -592,6 +613,7 @@ app.post("/commit", async (req, res) => {
   try {
     await git.add(".");
     await git.commit(req.body.message);
+    console.log("Commit:", (req.body.message || "").slice(0, 60));
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -608,6 +630,7 @@ app.post("/push", async (req, res) => {
   const git = simpleGit(currentRepoPath);
   try {
     await git.push();
+    console.log("Pushed to origin");
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -650,5 +673,5 @@ app.get("/diff", async (req, res) => {
 app.use(express.static("public"));
 
 app.listen(3000, () =>
-  console.log("Server running on http://localhost:3000")
+  console.log("GitLaTeX IDE is running on http://localhost:3000")
 );

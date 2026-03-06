@@ -19,6 +19,16 @@ function isViewableFile(path) {
   return VIEWABLE_EXTENSIONS.some(ext => path.toLowerCase().endsWith(ext));
 }
 
+const EDITABLE_EXTENSIONS = [".tex", ".bib", ".txt", ".md", ".sty", ".cls", ".dtx", ".ins", ".json", ".yml", ".yaml", ".toml", ".cfg", ".ini", ".csv", ".log", ".xml", ".html", ".htm", ".css", ".js", ".ts", ".sh", ".bat", ".py", ".r", ".rmd"];
+/** Extensions that must never open in editor (binary / vector art), even if they might match an editable suffix (e.g. .eps ends with .ps) */
+const NON_EDITABLE_EXTENSIONS = [".eps", ".ps"];
+function isEditableFile(path) {
+  if (!path) return false;
+  const lower = path.toLowerCase();
+  if (NON_EDITABLE_EXTENSIONS.some(ext => lower.endsWith(ext))) return false;
+  return EDITABLE_EXTENSIONS.some(ext => lower.endsWith(ext));
+}
+
 function showEditorPane() {
   const pane = document.getElementById("editor-pane");
   const viewer = document.getElementById("file-viewer");
@@ -32,13 +42,15 @@ function showFileViewer(path) {
   const viewer = document.getElementById("file-viewer");
   const img = document.getElementById("file-viewer-img");
   const pdfFrame = document.getElementById("file-viewer-pdf");
-  if (!pane || !viewer || !img || !pdfFrame) return;
+  const unavailable = document.getElementById("file-viewer-unavailable");
+  if (!pane || !viewer || !img || !pdfFrame || !unavailable) return;
   const ext = path.toLowerCase().slice(path.lastIndexOf("."));
   const isPdf = ext === ".pdf";
   const url = (typeof API_BASE !== "undefined" ? API_BASE : "") + "/file-raw?path=" + encodeURIComponent(path);
   pane.classList.add("viewer-active");
   viewer.classList.remove("hidden");
   viewer.setAttribute("aria-hidden", "false");
+  unavailable.classList.add("hidden");
   if (isPdf) {
     img.classList.add("hidden");
     pdfFrame.classList.remove("hidden");
@@ -49,6 +61,23 @@ function showFileViewer(path) {
     img.classList.remove("hidden");
     img.src = url;
   }
+}
+
+function showPreviewNotAvailable() {
+  const pane = document.getElementById("editor-pane");
+  const viewer = document.getElementById("file-viewer");
+  const img = document.getElementById("file-viewer-img");
+  const pdfFrame = document.getElementById("file-viewer-pdf");
+  const unavailable = document.getElementById("file-viewer-unavailable");
+  if (!pane || !viewer || !img || !pdfFrame || !unavailable) return;
+  pane.classList.add("viewer-active");
+  viewer.classList.remove("hidden");
+  viewer.setAttribute("aria-hidden", "false");
+  img.classList.add("hidden");
+  img.removeAttribute("src");
+  pdfFrame.classList.add("hidden");
+  pdfFrame.removeAttribute("src");
+  unavailable.classList.remove("hidden");
 }
 
 let editor = null;
@@ -1015,7 +1044,7 @@ async function loadFiles() {
     }
     renderFileTree(files, treeEl, "", currentFile, currentFolderPath);
     const firstTex = findFirstTexFile(files);
-    if (firstTex) loadFile(firstTex);
+    if (firstTex && !currentFolderPath) loadFile(firstTex);
   } catch (e) {
     treeEl.innerHTML = '<div class="sidebar-placeholder">Could not load files.</div>';
     setConsole("Error: " + (e.message || "Failed to load files"));
@@ -1035,6 +1064,10 @@ async function loadFile(path) {
     }
     if (isViewableFile(path)) {
       showFileViewer(path);
+      return;
+    }
+    if (!isEditableFile(path)) {
+      showPreviewNotAvailable();
       return;
     }
     const res = await fetchApi("/file?path=" + encodeURIComponent(path));
@@ -1179,8 +1212,8 @@ async function saveCurrentFile() {
     await showConfirmModal({ message: "No file selected. Please open a file first.", confirmLabel: "OK" });
     return;
   }
-  if (isViewableFile(currentFile)) {
-    setConsole("Cannot edit image or PDF; open a text file to edit.");
+  if (isViewableFile(currentFile) || !isEditableFile(currentFile)) {
+    setConsole("Cannot edit this file.");
     return;
   }
   const content = editor ? editor.getValue() : "";

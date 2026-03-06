@@ -552,6 +552,16 @@ body.sidebar-hidden #toggleSidebarBtn {
   display: none !important;
 }
 
+.file-viewer-unavailable {
+  color: var(--text-muted, #888);
+  font-size: 1rem;
+  padding: 1rem;
+}
+
+.file-viewer-unavailable.hidden {
+  display: none !important;
+}
+
 /* Monaco fills the pane; absolute so it stays within #editor below the navbar */
 #editor > .monaco-editor {
   position: absolute !important;
@@ -1087,14 +1097,14 @@ body.sidebar-hidden #toggleSidebarBtn {
 
 .repo-card-type-git {
   background: var(--accent-muted);
-  color: var(--accent);
-  border: 1px solid var(--accent);
+  color: var(--accent-hover);
+  border: 1px solid var(--accent-hover);
 }
 
 .repo-card-type-local {
   background: transparent;
-  border: 1px solid var(--border-subtle);
-  color: var(--text-secondary);
+  border: 1px solid var(--accent);
+  color: var(--accent);
 }
 
 .repo-list-empty {
