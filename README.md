@@ -242,6 +242,30 @@ An Overleaf-style review panel for leaving comments on your text.
   pull, and follow a file when you rename it. Deleting a file removes its
   comments.
 
+### Live collaboration (optional)
+
+Edit one project together with a few co-authors in real time (Overleaf-style
+shared cursors), while everyone keeps their own folder and their own Git.
+
+- **Off by default, per project.** Click the **people** icon in the top bar (or
+  *Live collaboration…* in the command palette) and enter the server, a room
+  name, the token and your name. Only that project is shared; it reconnects
+  whenever you open it again, until you choose **Stop sharing**.
+- **Only the text is relayed.** Each person's GitLaTeX writes the shared text to
+  their own disk, and compiles, commits and pushes from there as usual. Binary
+  files (images, PDFs) are not shared — commit and pull those.
+- **The room is the source of truth while it runs.** On joining, files that
+  differ from the room are replaced by the room's version, and files only you
+  have are added to it — commit first if you want to keep yours. A pull by one
+  person reaches everyone, so let one person pull during a session.
+- **You need a relay**: a small Cloudflare Worker in
+  [collab-worker/](collab-worker/README.md), deployable on Cloudflare's free plan
+  in a few minutes. Anyone with its token can join any room, so share the token
+  only with your co-authors.
+
+  See [docs/live-collaboration.md](docs/live-collaboration.md) for setup, how it
+  behaves, the API and how it is built.
+
 ---
 
 ## Workflow
@@ -349,6 +373,10 @@ serves `index.html` for unknown paths.
 | `engine/` | The WebAssembly TeX engine: worker, latexmk-style compile loop, package shelf |
 | `editor/`, `pdf/`, `latex/` | Monaco setup and LaTeX language features, the pdf.js viewer, log parsing and SyncTeX |
 | `components/` | Panels, dialogs, the projects home, Git panels |
+| `collab/` | Optional live collaboration: Yjs document per project, Monaco binding, remote cursors |
+
+**Collaboration relay** (`collab-worker/`) — a Cloudflare Worker with one Durable
+Object per room; see [collab-worker/README.md](collab-worker/README.md).
 
 **Classic front end** (`gitlatex/public/`, served at `/classic`)
 

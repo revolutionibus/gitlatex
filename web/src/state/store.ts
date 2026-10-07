@@ -11,6 +11,7 @@ import type { Wizard } from '../editor/slash-commands';
 import { DEFAULT_SETTINGS, type Diagnostic, type ProjectMeta, type Settings } from '../types';
 import type { UpdateInfo } from './updates';
 import type { ScmStatus } from '../storage/server';
+import type { CollabState } from '../collab/session';
 
 export type CompileStatus = 'idle' | 'running' | 'success' | 'warnings' | 'errors' | 'failed' | 'cancelled' | 'crashed';
 
@@ -21,6 +22,7 @@ export type Dialog =
   | { type: 'new-project'; initialTemplate?: string }
   | { type: 'settings'; section?: 'about' }
   | { type: 'publish' }
+  | { type: 'collab' }
   | { type: 'command-palette' }
   | { type: 'shortcuts' }
   | { type: 'wizard'; wizard: Wizard }
@@ -84,6 +86,8 @@ export interface AppState {
   update: UpdateInfo | null;
   /** The open project's Git state (null when it is not a repository). */
   scm: ScmStatus | null;
+  /** The live collaboration session of the open project (null when it is not shared). */
+  collab: CollabState | null;
 }
 
 const SETTINGS_KEY = 'gitlatex.settings';
@@ -180,6 +184,7 @@ export const useStore = create<AppState>(() => ({
   reviewCount: 0,
   update: null,
   scm: null,
+  collab: null,
 }));
 
 export const getState = useStore.getState;
