@@ -1,4 +1,4 @@
-import { Play, Square, ChevronDown, FolderOpen, Plus, FileArchive, FolderInput, Pencil, Copy, Trash2, Download, Moon, Sun, Search, RotateCcw, Zap, FileDown, FileText, Check, Columns2, PanelLeft, GitBranch, Home, ArrowUpFromLine } from 'lucide-react';
+import { Play, Square, ChevronDown, FolderOpen, Plus, FileArchive, FolderInput, Pencil, Copy, Trash2, Download, Moon, Sun, Search, RotateCcw, Zap, FileDown, FileText, Check, Columns2, PanelLeft, GitBranch, Home, ArrowUpFromLine, Users } from 'lucide-react';
 import { useStore, openDialog, setState, updateSettings } from '../state/store';
 import {
   cancelCompile, closeProject, compile, confirmDeleteProject, downloadActive, downloadPdf, downloadZip, duplicateProject, importFolderAsProject, importZipAsProject, newProjectDialog, openProject, promptClone, promptRenameProject, setEngine, setTheme,
@@ -7,6 +7,7 @@ import { pickFiles } from '../storage/local-disk';
 import { ENGINE_LABELS, type TexEngine } from '../engine/protocol';
 import { modKey, timeAgo } from '../utils/misc';
 import { Button, IconButton, Kbd, useMenu, clsx, type MenuItem } from './ui';
+import type { CollabState } from '../collab/session';
 
 /** The square GitLaTeX mark (public/logo-sq.png, also the favicon). */
 export function Logo({ className }: { className?: string }) {
@@ -30,6 +31,7 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
   const settings = useStore((s) => s.settings);
   const engineInfo = useStore((s) => s.engine.info);
   const sidebar = useStore((s) => s.sidebar);
+  const collab = useStore((s) => s.collab);
   const projectMenu = useMenu();
   const compileMenu = useMenu();
   const downloadMenu = useMenu();
@@ -148,6 +150,7 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
         </button>
       </div>
 
+      {project && <CollabButton collab={collab} />}
       {project?.hasGit && (
         <IconButton label="Source control: commit, push and pull" onClick={() => setState({ sidebar: 'git' })}>
           <ArrowUpFromLine className="size-4" />
@@ -183,5 +186,40 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
       {downloadMenu.node}
       {engineMenu.node}
     </header>
+  );
+}
+
+/** Live collaboration: who else is here (when the project is shared), or a button to share it. */
+function CollabButton({ collab }: { collab: CollabState | null }) {
+  if (!collab) {
+    return (
+      <IconButton label="Live collaboration" onClick={() => openDialog({ type: 'collab' })}>
+        <Users className="size-4" />
+      </IconButton>
+    );
+  }
+  const dot = collab.status === 'connected' ? 'bg-ok' : collab.status === 'connecting' ? 'bg-warn' : 'bg-danger';
+  const who = collab.peers.map((p) => p.name).join(', ');
+  return (
+    <button
+      onClick={() => openDialog({ type: 'collab' })}
+      title={`Live: ${collab.room} (${collab.status})${who ? ` — with ${who}` : ''}`}
+      aria-label="Live collaboration"
+      className="focus-ring flex h-8 items-center gap-1.5 rounded-md border border-line px-2 text-[12px] text-muted hover:bg-hover hover:text-fg"
+    >
+      <span className={clsx('size-2 rounded-full', dot)} />
+      <span className="hidden sm:inline">Live</span>
+      <span className="flex -space-x-1.5">
+        {collab.peers.slice(0, 4).map((p) => (
+          <span
+            key={p.id}
+            className="flex size-5 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-panel"
+            style={{ background: p.color }}
+          >
+            {p.name.slice(0, 1).toUpperCase()}
+          </span>
+        ))}
+      </span>
+    </button>
   );
 }

@@ -20,7 +20,8 @@
     "e2e": "node tests/e2e/run-e2e.mjs",
     "e2e:gitlatex": "node tests/e2e/gitlatex.mjs",
     "e2e:features": "node tests/e2e/editor-features.mjs",
-    "e2e:synctex": "node tests/e2e/synctex.mjs"
+    "e2e:synctex": "node tests/e2e/synctex.mjs",
+    "e2e:collab": "node tests/e2e/collab.mjs"
   },
   "dependencies": {
     "clsx": "^2.1.1",
@@ -34,6 +35,9 @@
     "pdfjs-dist": "^6.3.289",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
+    "y-partyserver": "^2.2.0",
+    "y-protocols": "^1.0.7",
+    "yjs": "^13.6.33",
     "zustand": "^5.0.15"
   },
   "devDependencies": {

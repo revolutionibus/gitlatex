@@ -71,7 +71,7 @@ function forgetLocalMeta(name: string) {
 }
 
 /** Files TeX writes next to the main document; never fed back into a compile. */
-const BUILD_OUTPUT = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|bcf|run\.xml|blg|nav|snm|vrb|xdv|synctex\.gz)$/i;
+export const BUILD_OUTPUT = /\.(aux|log|out|toc|lof|lot|fls|fdb_latexmk|bcf|run\.xml|blg|nav|snm|vrb|xdv|synctex\.gz)$/i;
 
 export class Workspace {
   /** Reports background write failures (set by the controller). */

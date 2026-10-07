@@ -25,6 +25,8 @@ import type { CompilerMode, Diagnostic, ProjectMeta } from '../types';
 import { basename, dirname, isTextPath, joinPath, normalisePath, relativePath, stripExt } from '../utils/paths';
 import { KEEP } from './workspace';
 import { TEMPLATES } from '../templates';
+import { startCollab, stopCollab } from '../collab/session';
+import { moveCollabConfig, readCollabConfig, readCollabUser, writeCollabConfig, writeCollabUser, type CollabConfig, type CollabUser } from '../collab/config';
 
 // ---------------------------------------------------------------------------
 // Engine
@@ -110,6 +112,7 @@ export async function openProject(id: string) {
     await ws.flush();
     unsubscribe?.();
   }
+  stopCollab();
   engine.cancel();
   let next: Workspace;
   try {
@@ -152,6 +155,9 @@ export async function openProject(id: string) {
     /* ignore */
   }
   void refreshScm();
+  const collab = readCollabConfig(next.project.id);
+  const user = readCollabUser();
+  if (collab.enabled && collab.host && collab.token && user.name) startCollab(next, collab, user);
   // Show the PDF from the last build straight away, as the classic UI did.
   void showExistingPdf(next);
   void warmUpEngine();
@@ -164,6 +170,7 @@ export async function closeProject() {
     await ws.flush();
     unsubscribe?.();
   }
+  stopCollab();
   engine.cancel();
   ws = null;
   unsubscribe = null;
@@ -197,6 +204,27 @@ async function showExistingPdf(current: Workspace) {
 function persistTabs() {
   const { openTabs, activePath } = getState();
   ws?.updateMeta({ openTabs, activePath });
+}
+
+// ---------------------------------------------------------------------------
+// Live collaboration (optional, per project)
+// ---------------------------------------------------------------------------
+
+/** Share the open project live: save the settings and connect. */
+export async function joinCollab(config: CollabConfig, user: CollabUser) {
+  if (!ws) return;
+  writeCollabUser(user);
+  writeCollabConfig(ws.project.id, { ...config, enabled: true });
+  await ws.flush();
+  startCollab(ws, { ...config, enabled: true }, user);
+}
+
+/** Stop sharing the open project. Files stay as they are on disk. */
+export function leaveCollab() {
+  if (!ws) return;
+  writeCollabConfig(ws.project.id, { ...readCollabConfig(ws.project.id), enabled: false });
+  stopCollab();
+  toast({ kind: 'info', title: 'Left the live session', message: 'Your files stay as they are on disk.' });
 }
 
 // ---------------------------------------------------------------------------
@@ -417,9 +445,13 @@ export function promptRenameProject(id = ws?.project.id) {
     onSubmit: async (name) => {
       if (!name.trim() || name.trim() === id) return;
       const wasOpen = ws?.project.id === id;
-      if (wasOpen) await ws!.flush();
+      if (wasOpen) {
+        await ws!.flush();
+        stopCollab();
+      }
       const renamed = await server.renameProject(id, name.trim());
       Workspace.renamed(id, renamed.name);
+      moveCollabConfig(id, renamed.name);
       await refreshProjects();
       if (wasOpen) await openProject(renamed.name);
     },
@@ -457,6 +489,7 @@ export function confirmDeleteProject(id: string) {
       if (ws?.project.id === id) await closeProject();
       await server.deleteProject(id);
       Workspace.forget(id);
+      moveCollabConfig(id, null);
       await refreshProjects();
     },
   });
