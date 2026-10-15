@@ -1,4 +1,4 @@
-import { Files, ListTree, History, Cpu, Settings, Keyboard, CircleHelp, GitBranch, Home, MessageSquareText } from 'lucide-react';
+import { Files, ListTree, History, Cpu, Settings, Keyboard, CircleHelp, GitBranch, MessageSquareText, Users } from 'lucide-react';
 import { useStore, setState, openDialog, type SidebarView } from '../state/store';
 import { FileTree } from './FileTree';
 import { OutlinePanel } from './OutlinePanel';
@@ -6,8 +6,9 @@ import { GitPanel } from './GitPanel';
 import { ReviewPanel } from './ReviewPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { EnginePanel } from './EnginePanel';
+import { CollabPanel } from './CollabPanel';
 import { clsx } from './ui';
-import { closeProject, newProjectDialog } from '../state/actions';
+import { newProjectDialog } from '../state/actions';
 
 const VIEWS: { id: SidebarView; label: string; icon: React.ReactNode }[] = [
   { id: 'files', label: 'Files', icon: <Files className="size-[18px]" /> },
@@ -15,6 +16,7 @@ const VIEWS: { id: SidebarView; label: string; icon: React.ReactNode }[] = [
   { id: 'review', label: 'Review comments', icon: <MessageSquareText className="size-[18px]" /> },
   { id: 'git', label: 'Source control', icon: <GitBranch className="size-[18px]" /> },
   { id: 'history', label: 'Commit history', icon: <History className="size-[18px]" /> },
+  { id: 'collab', label: 'Live collaboration', icon: <Users className="size-[18px]" /> },
   { id: 'engine', label: 'Compiler', icon: <Cpu className="size-[18px]" /> },
 ];
 
@@ -22,6 +24,7 @@ export function ActivityBar() {
   const sidebar = useStore((s) => s.sidebar);
   const reviewCount = useStore((s) => s.reviewCount);
   const scmCount = useStore((s) => (s.scm ? s.scm.staged.length + s.scm.changes.length + s.scm.conflicts.length : 0));
+  const online = useStore((s) => s.collab?.peers.length ?? 0);
   const update = useStore((s) => s.update);
   const hasUpdate = !!update?.updateAvailable;
   const btn = (active: boolean, label: string, icon: React.ReactNode, onClick: () => void, badge = 0) => (
@@ -45,9 +48,7 @@ export function ActivityBar() {
   );
   return (
     <nav className="hidden w-12 shrink-0 flex-col items-center gap-1 border-r border-line bg-panel py-2 sm:flex" aria-label="Sidebar views">
-      {btn(false, 'All projects', <Home className="size-[18px]" />, () => void closeProject())}
-      <div className="my-1 h-px w-6 bg-line" />
-      {VIEWS.map((v) => btn(sidebar === v.id, v.label, v.icon, () => setState({ sidebar: sidebar === v.id ? null : v.id }), v.id === 'review' ? reviewCount : v.id === 'git' ? scmCount : 0))}
+      {VIEWS.map((v) => btn(sidebar === v.id, v.label, v.icon, () => setState({ sidebar: sidebar === v.id ? null : v.id }), v.id === 'review' ? reviewCount : v.id === 'git' ? scmCount : v.id === 'collab' ? online : 0))}
       <div className="flex-1" />
       {btn(false, 'Help & templates', <CircleHelp className="size-[18px]" />, () => newProjectDialog())}
       {btn(false, 'Keyboard shortcuts', <Keyboard className="size-[18px]" />, () => openDialog({ type: 'shortcuts' }))}
@@ -65,6 +66,7 @@ export function Sidebar() {
       {sidebar === 'review' && <ReviewPanel />}
       {sidebar === 'git' && <GitPanel />}
       {sidebar === 'history' && <HistoryPanel />}
+      {sidebar === 'collab' && <CollabPanel />}
       {sidebar === 'engine' && <EnginePanel />}
     </aside>
   );

@@ -1,12 +1,12 @@
-import { Play, Square, ChevronDown, FolderOpen, Plus, FileArchive, FolderInput, Pencil, Copy, Trash2, Download, Moon, Sun, Search, RotateCcw, Zap, FileDown, FileText, Check, Columns2, PanelLeft, GitBranch, Home, ArrowUpFromLine } from 'lucide-react';
+import { Play, Square, ChevronDown, FolderOpen, Plus, FileArchive, FolderInput, Pencil, Copy, Trash2, Download, Moon, Sun, Search, RotateCcw, Zap, FileDown, FileText, Check, PanelLeft, GitBranch, Home } from 'lucide-react';
 import { useStore, openDialog, setState, updateSettings } from '../state/store';
 import {
-  cancelCompile, closeProject, compile, confirmDeleteProject, downloadActive, downloadPdf, downloadZip, duplicateProject, importFolderAsProject, importZipAsProject, newProjectDialog, openProject, promptClone, promptRenameProject, setEngine, setTheme,
+  cancelCompile, closeProject, compile, confirmDeleteProject, downloadActive, downloadPdf, downloadZip, duplicateProject, importFolderAsProject, importZipAsProject, newProjectDialog, openProject, promptClone, promptRenameProject, setTheme, goToPeer,
 } from '../state/actions';
 import { pickFiles } from '../storage/local-disk';
-import { ENGINE_LABELS, type TexEngine } from '../engine/protocol';
 import { modKey, timeAgo } from '../utils/misc';
 import { Button, IconButton, Kbd, useMenu, clsx, type MenuItem } from './ui';
+import type { CollabState } from '../collab/session';
 
 /** The square GitLaTeX mark (public/logo-sq.png, also the favicon). */
 export function Logo({ className }: { className?: string }) {
@@ -28,12 +28,11 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
   const projects = useStore((s) => s.projects);
   const status = useStore((s) => s.compile.status);
   const settings = useStore((s) => s.settings);
-  const engineInfo = useStore((s) => s.engine.info);
   const sidebar = useStore((s) => s.sidebar);
+  const collab = useStore((s) => s.collab);
   const projectMenu = useMenu();
   const compileMenu = useMenu();
   const downloadMenu = useMenu();
-  const engineMenu = useMenu();
   const running = status === 'running';
 
   const projectItems = (): (MenuItem | 'separator')[] => [
@@ -56,17 +55,6 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
     { label: 'Delete project…', icon: <Trash2 className="size-3.5" />, danger: true, onSelect: () => project && confirmDeleteProject(project.id) },
   ];
 
-  const engineItems = (): MenuItem[] =>
-    (['pdftex', 'xetex', 'luatex'] as TexEngine[]).map((e) => {
-      const available = !engineInfo || engineInfo.engines.includes(e);
-      return {
-        label: `${ENGINE_LABELS[e]}${available ? '' : ' (not in this engine build)'}`,
-        icon: project?.engine === e ? <Check className="size-3.5 text-accent" /> : undefined,
-        disabled: !available,
-        onSelect: () => setEngine(e),
-      };
-    });
-
   return (
     <header className="flex h-11 shrink-0 items-center gap-2 border-b border-line bg-panel px-2">
       <IconButton label="Toggle sidebar" onClick={() => setState({ sidebar: sidebar ? null : 'files' })} className="sm:hidden">
@@ -80,7 +68,7 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
       >
         <Logo className="md:hidden" />
         <div className="hidden md:block">
-          <Wordmark className="h-6" />
+          <Wordmark className="h-8" />
         </div>
       </button>
       <span className="hidden h-5 w-px bg-line md:block" />
@@ -105,16 +93,6 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
           ))}
         </div>
       )}
-
-      <button
-        onClick={(e) => engineMenu.open(e, engineItems(), true)}
-        className="focus-ring hidden items-center gap-1 rounded-md border border-line px-2 py-1 text-[12px] text-muted hover:bg-hover hover:text-fg sm:flex"
-        title="TeX engine for this project"
-      >
-        <Columns2 className="size-3.5" />
-        {project ? ENGINE_LABELS[project.engine] : '…'}
-        <ChevronDown className="size-3" />
-      </button>
 
       <div className="flex items-stretch">
         {running ? (
@@ -148,11 +126,7 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
         </button>
       </div>
 
-      {project?.hasGit && (
-        <IconButton label="Source control: commit, push and pull" onClick={() => setState({ sidebar: 'git' })}>
-          <ArrowUpFromLine className="size-4" />
-        </IconButton>
-      )}
+      <OnlinePeers collab={collab} />
       <IconButton
         label="Download"
         onClick={(e) =>
@@ -181,7 +155,42 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
       {projectMenu.node}
       {compileMenu.node}
       {downloadMenu.node}
-      {engineMenu.node}
     </header>
+  );
+}
+
+/** Live collaboration: the people editing this project with you right now (nothing when nobody is). */
+function OnlinePeers({ collab }: { collab: CollabState | null }) {
+  if (!collab?.peers.length) return null;
+  const shown = collab.peers.slice(0, 4);
+  const more = collab.peers.length - shown.length;
+  const avatar = 'focus-ring flex size-6 items-center justify-center rounded-full text-[10.5px] font-semibold ring-2 ring-panel transition-transform hover:z-10 hover:-translate-y-0.5';
+  return (
+    <div className="flex h-8 items-center px-1.5" role="group" aria-label={`Live collaboration: ${collab.peers.length} online`}>
+      <span className="flex -space-x-1.5">
+        {shown.map((p) => (
+          <button
+            key={p.id}
+            onClick={() => goToPeer(p.id)}
+            title={p.path ? `Go to ${p.name}, editing ${p.path}` : `${p.name} has no file open`}
+            aria-label={`Go to ${p.name}`}
+            className={clsx(avatar, 'text-white')}
+            style={{ background: p.color }}
+          >
+            {p.name.slice(0, 1).toUpperCase()}
+          </button>
+        ))}
+        {more > 0 && (
+          <button
+            onClick={() => setState({ sidebar: 'collab' })}
+            title={`Also online: ${collab.peers.slice(shown.length).map((p) => p.name).join(', ')}`}
+            aria-label={`${more} more online`}
+            className={clsx(avatar, 'bg-line text-[10px] text-muted')}
+          >
+            +{more}
+          </button>
+        )}
+      </span>
+    </div>
   );
 }

@@ -11,10 +11,12 @@ import type { Wizard } from '../editor/slash-commands';
 import { DEFAULT_SETTINGS, type Diagnostic, type ProjectMeta, type Settings } from '../types';
 import type { UpdateInfo } from './updates';
 import type { ScmStatus } from '../storage/server';
+import type { CollabState } from '../collab/session';
+import { readCollabAdmin, readCollabColor, type CollabAdmin } from '../collab/config';
 
 export type CompileStatus = 'idle' | 'running' | 'success' | 'warnings' | 'errors' | 'failed' | 'cancelled' | 'crashed';
 
-export type SidebarView = 'files' | 'outline' | 'review' | 'git' | 'history' | 'engine';
+export type SidebarView = 'files' | 'outline' | 'review' | 'git' | 'history' | 'collab' | 'engine';
 export type BottomView = 'problems' | 'log' | 'console';
 
 export type Dialog =
@@ -45,6 +47,7 @@ export interface CompileState {
   /** Last successfully produced PDF (kept visible while a later compile fails). */
   pdf: Uint8Array | null;
   pdfVersion: number;
+  cursorPage: number | null;
   pdfFromCurrentRun: boolean;
   synctex: SyncTex | null;
   diagnostics: Diagnostic[];
@@ -57,6 +60,8 @@ export interface CompileState {
 export interface AppState {
   settings: Settings;
   projects: ProjectMeta[];
+  /** Projects whose folders are being deleted right now. */
+  deleting: string[];
   project: ProjectMeta | null;
   treeVersion: number;
   contentVersion: number;
@@ -84,6 +89,12 @@ export interface AppState {
   update: UpdateInfo | null;
   /** The open project's Git state (null when it is not a repository). */
   scm: ScmStatus | null;
+  /** The live collaboration session of the open project (null when it is not shared). */
+  collab: CollabState | null;
+  /** The relay owner's login (global, not per project); null when not signed in. */
+  collabAdmin: CollabAdmin | null;
+  /** Your cursor colour in live sessions. */
+  collabColor: string;
 }
 
 const SETTINGS_KEY = 'gitlatex.settings';
@@ -148,6 +159,7 @@ export const initialCompile: CompileState = {
   result: null,
   pdf: null,
   pdfVersion: 0,
+  cursorPage: null,
   pdfFromCurrentRun: false,
   synctex: null,
   diagnostics: [],
@@ -160,6 +172,7 @@ export const initialCompile: CompileState = {
 export const useStore = create<AppState>(() => ({
   settings: loadSettings(),
   projects: [],
+  deleting: [],
   project: null,
   treeVersion: 0,
   contentVersion: 0,
@@ -180,6 +193,9 @@ export const useStore = create<AppState>(() => ({
   reviewCount: 0,
   update: null,
   scm: null,
+  collab: null,
+  collabAdmin: readCollabAdmin(),
+  collabColor: readCollabColor(),
 }));
 
 export const getState = useStore.getState;
