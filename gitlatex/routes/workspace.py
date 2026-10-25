@@ -8,6 +8,7 @@ can reach outside the open project.
     POST /api/project/open    select a project and return every file in it
     POST /api/project/create  create a project folder from a set of files
     POST /api/project/rename  rename a project folder
+    POST /api/project/clean   delete LaTeX build files (.aux, .log, …)
     POST /api/fs/write        write one file (text or base64)
     POST /api/fs/mkdir        create a folder (existing is fine)
     POST /api/fs/delete       delete a file or folder (missing is fine)
@@ -180,6 +181,35 @@ def rename_project():
     if was_current:
         state.current_repo_path = dst
     return jsonify(success=True, name=name)
+
+
+@bp.route("/api/project/clean", methods=["POST"])
+@with_project_lock
+def clean_project():
+    """Delete build output, like latexmk -c (VimTeX's :VimtexClean): a file goes
+    only when it is X<build suffix> next to an X.tex, so a stray notes.log stays.
+    The PDF is kept."""
+    root = state.current_repo_path
+    if not root:
+        return _no_project()
+    removed = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in HIDDEN_NAMES]
+        stems = {name[:-4] for name in filenames if name.lower().endswith(".tex")}
+        if not stems:
+            continue
+        for name in filenames:
+            lower = name.lower()
+            suffix = next((s for s in BUILD_SUFFIXES if lower.endswith(s)), None)
+            if not suffix or name[: -len(suffix)] not in stems:
+                continue
+            full = os.path.join(dirpath, name)
+            try:
+                os.unlink(full)
+                removed.append(_rel(full))
+            except OSError:
+                continue
+    return jsonify(success=True, removed=sorted(removed))
 
 
 @bp.route("/api/fs/write", methods=["POST"])

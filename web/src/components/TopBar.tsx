@@ -1,7 +1,7 @@
-import { Play, Square, ChevronDown, FolderOpen, Plus, FileArchive, FolderInput, Pencil, Copy, Trash2, Download, Moon, Sun, Search, RotateCcw, Zap, FileDown, FileText, Check, Columns2, PanelLeft, GitBranch, Home, ArrowUpFromLine } from 'lucide-react';
+import { Play, Square, ChevronDown, FolderOpen, Plus, FileArchive, FolderInput, Pencil, Copy, Trash2, Download, Moon, Sun, Search, RotateCcw, Zap, FileDown, FileText, Check, Columns2, PanelLeft, GitBranch, Home, ArrowUpFromLine, Eraser } from 'lucide-react';
 import { useStore, openDialog, setState, updateSettings } from '../state/store';
 import {
-  cancelCompile, closeProject, compile, confirmDeleteProject, downloadActive, downloadPdf, downloadZip, duplicateProject, importFolderAsProject, importZipAsProject, newProjectDialog, openProject, promptClone, promptRenameProject, setEngine, setTheme,
+  cancelCompile, cleanAuxFiles, closeProject, compile, confirmDeleteProject, downloadActive, downloadPdf, downloadZip, duplicateProject, importFolderAsProject, importZipAsProject, newProjectDialog, openProject, promptClone, promptRenameProject, setEngine, setTheme,
 } from '../state/actions';
 import { pickFiles } from '../storage/local-disk';
 import { ENGINE_LABELS, type TexEngine } from '../engine/protocol';
@@ -148,6 +148,9 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
         </button>
       </div>
 
+      <IconButton label="Clean build files (.aux, .log, …)" disabled={!project} onClick={() => void cleanAuxFiles()}>
+        <Eraser className="size-4" />
+      </IconButton>
       {project?.hasGit && (
         <IconButton label="Source control: commit, push and pull" onClick={() => setState({ sidebar: 'git' })}>
           <ArrowUpFromLine className="size-4" />

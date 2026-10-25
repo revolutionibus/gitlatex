@@ -83,6 +83,8 @@ export const createProject = (name: string, files: { path: string; text?: string
   });
 export const deleteProject = (name: string) => post('/delete-repo', { name });
 export const renameProject = (from: string, to: string) => post<{ name: string }>('/api/project/rename', { from, to });
+/** Delete LaTeX build files (.aux, .log, …) next to each .tex, like latexmk -c. */
+export const cleanProject = () => post<{ removed: string[] }>('/api/project/clean');
 export const cloneProject = (repoUrl: string) => post('/clone', { repoUrl });
 
 // ---- files -------------------------------------------------------------------------
