@@ -148,12 +148,39 @@ label:has(> input[type='checkbox']) {
   background: var(--c-accent);
 }
 
-/* PDF pages */
-.pdf-page {
+/* PDF pages (laid out by pdf.js's PDFViewer, src/pdf/PdfViewer.tsx) */
+.pdfViewer .page {
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.25), 0 8px 24px -8px rgb(0 0 0 / 0.35);
 }
-.pdf-dark .pdf-page canvas {
+.pdf-dark .pdfViewer .page canvas {
   filter: invert(0.9) hue-rotate(180deg) contrast(0.9);
+}
+
+/* The jump-history pill and panel come styled from pdf_viewer.css; these hand
+   them the app's theme colours instead of Firefox's. */
+:is(#jumpHistory, #jumpHistoryPanel) {
+  --jump-history-border-color: var(--c-line) !important;
+  --jump-history-bg-color: var(--c-panel) !important;
+  --jump-history-text-color: var(--c-fg) !important;
+  --jump-history-hover-color: var(--c-hover) !important;
+  --jump-history-field-bg-color: var(--c-bg) !important;
+  --jump-history-toolbar-height: 36px !important;
+}
+:is(#jumpHistory > .jumpHistoryButton, #jumpHistoryPanel) {
+  font-family: var(--font-sans) !important;
+}
+.jump-history-action {
+  padding: 3px 10px;
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  background: var(--c-bg);
+  color: var(--c-fg);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.jump-history-action:hover {
+  border-color: var(--c-accent);
 }
 .synctex-flash {
   animation: synctex-flash 1.8s ease-out forwards;
@@ -163,44 +190,7 @@ label:has(> input[type='checkbox']) {
   100% { background: rgb(var(--c-accent-rgb) / 0); outline: 2px solid rgb(var(--c-accent-rgb) / 0); }
 }
 
-/* pdf.js text layer (ported from pdf_viewer.css): transparent text over the
-   canvas for selection and copy. Relies on --total-scale-factor on the page. */
-.textLayer {
-  position: absolute;
-  inset: 0;
-  overflow: clip;
-  opacity: 1;
-  line-height: 1;
-  text-align: initial;
-  letter-spacing: normal;
-  word-spacing: normal;
-  text-size-adjust: none;
-  forced-color-adjust: none;
-  transform-origin: 0 0;
-  z-index: 0;
-  --min-font-size: 1;
-  --text-scale-factor: calc(var(--total-scale-factor) * var(--min-font-size));
-  --min-font-size-inv: calc(1 / var(--min-font-size));
-}
-.textLayer :is(span, br) {
-  color: transparent;
-  position: absolute;
-  white-space: pre;
-  cursor: text;
-  transform-origin: 0% 0%;
-}
-.textLayer > :not(.markedContent),
-.textLayer .markedContent span:not(.markedContent) {
-  z-index: 1;
-  --font-height: 0;
-  font-size: calc(var(--text-scale-factor) * var(--font-height));
-  --scale-x: 1;
-  --rotate: 0deg;
-  transform: rotate(var(--rotate)) scaleX(var(--scale-x)) scale(var(--min-font-size-inv));
-}
-.textLayer .markedContent {
-  display: contents;
-}
+/* The text layer itself is styled by pdf_viewer.css. */
 .textLayer ::selection {
   background: rgb(var(--c-accent-rgb) / 0.35);
 }

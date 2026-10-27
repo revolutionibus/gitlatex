@@ -31,7 +31,7 @@
     "material-symbols": "^0.47.5",
     "monaco-editor": "^0.57.0",
     "monaco-vim": "^0.4.4",
-    "pdfjs-dist": "^6.3.289",
+    "pdfjs-dist": "github:revolutionibus/pdf.js#v1.0.1",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "zustand": "^5.0.15"
