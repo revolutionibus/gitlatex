@@ -343,6 +343,37 @@ def gh_ready():
         return False
 
 
+_github_login = None
+
+
+def github_user():
+    """The GitHub username of whoever runs GitLaTeX, or None.
+
+    Asks the GitHub CLI (`gh api user`) and falls back to `git config github.user`.
+    A found name is cached for the life of the server; a miss is retried next time.
+    """
+    global _github_login
+    if _github_login:
+        return _github_login
+    login = None
+    gh = shutil.which("gh")
+    if gh:
+        try:
+            done = subprocess.run([gh, "api", "user", "--jq", ".login"], capture_output=True, text=True, timeout=15)
+            if done.returncode == 0:
+                login = done.stdout.strip() or None
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    if not login:
+        try:
+            done = subprocess.run(["git", "config", "--global", "github.user"], capture_output=True, text=True, timeout=5)
+            login = done.stdout.strip() or None
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+    _github_login = login
+    return login
+
+
 def publish(repo, url=None, name=None, private=True):
     """Give a local repository a remote and push it.
 

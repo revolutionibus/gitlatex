@@ -226,6 +226,7 @@ export const scm = {
   branches: () => get<{ local: string[]; remote: string[] }>('/api/scm/branches'),
   checkout: (name: string, create = false) => post<ScmResult>('/api/scm/checkout', { name, create }),
   publishOptions: () => get<{ gh: boolean }>('/api/scm/publish-options'),
+  githubUser: () => get<{ login: string | null }>('/api/scm/github-user'),
   publish: (opts: { url?: string; name?: string; private?: boolean }) => post<ScmResult>('/api/scm/publish', opts),
   diff: (path: string, staged: boolean) => get<FileDiff>(`/api/scm/diff${qs({ path, staged: staged ? '1' : '0' })}`),
 };

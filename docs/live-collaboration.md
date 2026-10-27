@@ -46,7 +46,9 @@ npx wrangler deploy
    - **Room**: any name; everyone working on this project uses the same one
      (defaults to the project's folder name)
    - **Token**: the `ROOM_TOKEN` you chose
-   - **Your name** and a colour, so others can tell whose cursor is whose
+   - A colour, so others can tell whose cursor is whose. Your cursor is labelled
+     with your **GitHub username**, read from the GitHub CLI (`gh auth login`) or
+     `git config --global github.user`; only if neither is set do you type it in
 4. Click **Share live**.
 
 Send the server address, room name and token to your co-authors. They do the
@@ -227,7 +229,7 @@ provider.on('sync', (synced: boolean) => {
 
 | File | What it does |
 | --- | --- |
-| `config.ts` | Per-project settings (on/off, server, room, token) and your name and colour, in `localStorage`. |
+| `config.ts` | Per-project settings (on/off, server, room, token) and your GitHub username and colour, in `localStorage`. |
 | `session.ts` | One live session for the open project. On joining, it merges the file sets and takes the room's text. After that it mirrors local changes into the room and the room's changes into the Workspace, and so onto disk. It also tracks who is online. |
 | `binding.ts` | Two-way binding between a Monaco model and a `Y.Text`. Remote edits are applied as one batch so your cursor stays put. It also draws other people's cursors and selections. |
 

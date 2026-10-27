@@ -3,10 +3,11 @@
  * GitLaTeX relay (collab-worker/), or stop sharing it. Off by default; each
  * project is shared on its own.
  */
-import { useState } from 'react';
-import { Users, Unplug, Radio } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Users, Unplug, Radio, UserRound } from 'lucide-react';
 import { closeDialog, useStore } from '../state/store';
 import { joinCollab, leaveCollab } from '../state/actions';
+import * as server from '../storage/server';
 import { PEER_COLORS, readCollabConfig, readCollabUser, roomName } from '../collab/config';
 import { Button, Modal, TextInput, clsx } from './ui';
 
@@ -18,17 +19,33 @@ export function CollabDialog() {
   const [host, setHost] = useState(config.host);
   const [room, setRoom] = useState(config.room);
   const [token, setToken] = useState(config.token);
-  const [name, setName] = useState(user.name);
+  // Everyone is shown by their GitHub username (also on their cursor). It comes from the
+  // GitHub CLI or `git config github.user`; only when neither knows it is it typed in.
+  const [login, setLogin] = useState<string | null | undefined>(undefined);
+  const [typed, setTyped] = useState(user.name);
   const [color, setColor] = useState(user.color);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let live = true;
+    server.scm
+      .githubUser()
+      .then((r) => live && setLogin(r.login))
+      .catch(() => live && setLogin(null));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const name = (login ?? typed).trim().replace(/^@/, '');
 
   const join = async () => {
     const r = roomName(room);
     if (!host.trim()) return setError('Enter the address of your collaboration server.');
     if (!r) return setError('Enter a room name.');
     if (!token.trim()) return setError('Enter the server’s token.');
-    if (!name.trim()) return setError('Enter your name, so others know who is typing.');
-    await joinCollab({ enabled: true, host: host.trim(), room: r, token: token.trim() }, { name: name.trim().slice(0, 32), color });
+    if (!name) return setError('Enter your GitHub username, so others know who is typing.');
+    await joinCollab({ enabled: true, host: host.trim(), room: r, token: token.trim() }, { name: name.slice(0, 39), color });
     closeDialog();
   };
 
@@ -109,7 +126,20 @@ export function CollabDialog() {
             {field('Room', <TextInput value={room} onChange={(e) => setRoom(e.target.value)} onBlur={() => setRoom(roomName(room))} />)}
             {field('Token', <TextInput type="password" value={token} onChange={(e) => setToken(e.target.value)} />)}
           </div>
-          {field('Your name', <TextInput value={name} maxLength={32} placeholder="Ada" onChange={(e) => setName(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void join()} />)}
+          {login ? (
+            <p className="flex items-center gap-1.5 text-[13px] text-muted">
+              <UserRound className="size-3.5" />
+              Editing as <b className="text-fg">@{login}</b>
+            </p>
+          ) : login === null ? (
+            field(
+              'GitHub username',
+              <TextInput value={typed} maxLength={39} placeholder="octocat" onChange={(e) => setTyped(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && void join()} />,
+              'Could not read it from the GitHub CLI. Run `gh auth login` or `git config --global github.user <name>` to skip this.',
+            )
+          ) : (
+            <p className="text-[13px] text-faint">Looking up your GitHub username…</p>
+          )}
           <div className="flex items-center gap-1.5">
             {PEER_COLORS.map((c) => (
               <button

@@ -1,4 +1,4 @@
-import { Play, Square, ChevronDown, FolderOpen, Plus, FileArchive, FolderInput, Pencil, Copy, Trash2, Download, Moon, Sun, Search, RotateCcw, Zap, FileDown, FileText, Check, Columns2, PanelLeft, GitBranch, Home, ArrowUpFromLine, Eraser, Users } from 'lucide-react';
+import { Play, Square, ChevronDown, FolderOpen, Plus, FileArchive, FolderInput, Pencil, Copy, Trash2, Download, Moon, Sun, Search, RotateCcw, Zap, FileDown, FileText, Check, Columns2, PanelLeft, GitBranch, Home, ArrowUpFromLine, Eraser } from 'lucide-react';
 import { useStore, openDialog, setState, updateSettings } from '../state/store';
 import {
   cancelCompile, cleanAuxFiles, closeProject, compile, confirmDeleteProject, downloadActive, downloadPdf, downloadZip, duplicateProject, importFolderAsProject, importZipAsProject, newProjectDialog, openProject, promptClone, promptRenameProject, setEngine, setTheme,
@@ -8,6 +8,7 @@ import { ENGINE_LABELS, type TexEngine } from '../engine/protocol';
 import { modKey, timeAgo } from '../utils/misc';
 import { Button, IconButton, Kbd, useMenu, clsx, type MenuItem } from './ui';
 import type { CollabState } from '../collab/session';
+import { readCollabUser } from '../collab/config';
 
 /** The square GitLaTeX mark (public/logo-sq.png, also the favicon). */
 export function Logo({ className }: { className?: string }) {
@@ -192,37 +193,35 @@ export function TopBar({ compact, mobileView, onMobileView }: { compact: boolean
   );
 }
 
-/** Live collaboration: who else is here (when the project is shared), or a button to share it. */
+/** Live collaboration: the initials of everyone editing (you first), when the project is shared. */
 function CollabButton({ collab }: { collab: CollabState | null }) {
-  if (!collab) {
-    return (
-      <IconButton label="Live collaboration" onClick={() => openDialog({ type: 'collab' })}>
-        <Users className="size-4" />
-      </IconButton>
-    );
-  }
+  if (!collab) return null;
+  const me = readCollabUser();
+  const people = [{ id: -1, name: me.name || 'You', color: me.color }, ...collab.peers];
+  const extra = people.length - 4;
   const dot = collab.status === 'connected' ? 'bg-ok' : collab.status === 'connecting' ? 'bg-warn' : 'bg-danger';
-  const who = collab.peers.map((p) => p.name).join(', ');
   return (
     <button
       onClick={() => openDialog({ type: 'collab' })}
-      title={`Live: ${collab.room} (${collab.status})${who ? ` — with ${who}` : ''}`}
+      title={`Live: ${collab.room} (${collab.status}) — ${people.map((p, i) => (i === 0 ? `${p.name} (you)` : p.name)).join(', ')}`}
       aria-label="Live collaboration"
-      className="focus-ring flex h-8 items-center gap-1.5 rounded-md border border-line px-2 text-[12px] text-muted hover:bg-hover hover:text-fg"
+      className="focus-ring relative flex h-8 items-center rounded-md px-1 hover:bg-hover"
     >
-      <span className={clsx('size-2 rounded-full', dot)} />
-      <span className="hidden sm:inline">Live</span>
       <span className="flex -space-x-1.5">
-        {collab.peers.slice(0, 4).map((p) => (
+        {people.slice(0, 4).map((p) => (
           <span
             key={p.id}
-            className="flex size-5 items-center justify-center rounded-full text-[10px] font-semibold text-white ring-2 ring-panel"
+            className="flex size-6 items-center justify-center rounded-full text-[11px] font-semibold text-white ring-2 ring-panel"
             style={{ background: p.color }}
           >
             {p.name.slice(0, 1).toUpperCase()}
           </span>
         ))}
+        {extra > 0 && (
+          <span className="flex size-6 items-center justify-center rounded-full bg-panel-2 text-[10px] font-semibold text-muted ring-2 ring-panel">+{extra}</span>
+        )}
       </span>
+      <span className={clsx('absolute bottom-1 right-0.5 size-2 rounded-full ring-2 ring-panel', dot)} aria-hidden />
     </button>
   );
 }

@@ -313,7 +313,7 @@ class Session {
 
 /** Names go into a CSS string: keep them short and free of control characters. */
 function cleanName(name: unknown) {
-  return typeof name === 'string' ? name.replace(/[\u0000-\u001f\u007f\\]/g, '').trim().slice(0, 32) : '';
+  return typeof name === 'string' ? name.replace(/[\u0000-\u001f\u007f\\]/g, '').trim().slice(0, 39) : '';
 }
 
 const peerStyles = (() => {

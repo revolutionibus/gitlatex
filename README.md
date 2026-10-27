@@ -247,9 +247,10 @@ An Overleaf-style review panel for leaving comments on your text.
 Edit one project together with a few co-authors in real time (Overleaf-style
 shared cursors), while everyone keeps their own folder and their own Git.
 
-- **Off by default, per project.** Click the **people** icon in the top bar (or
-  *Live collaboration…* in the command palette) and enter the server, a room
-  name, the token and your name. Only that project is shared; it reconnects
+- **Off by default, per project.** Click the **people** icon in the side panel
+  (above Compiler), or *Live collaboration…* in the command palette, and enter
+  the server, a room name and the token. Your cursor shows your GitHub username,
+  and the top bar shows the initials of everyone editing. Only that project is shared; it reconnects
   whenever you open it again, until you choose **Stop sharing**.
 - **Only the text is relayed.** Each person's GitLaTeX writes the shared text to
   their own disk, and compiles, commits and pushes from there as usual. Binary

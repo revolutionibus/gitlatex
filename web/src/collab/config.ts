@@ -1,6 +1,6 @@
 /**
  * Live collaboration settings. Each project decides on its own whether it is
- * shared (and in which room); your display name and colour are global.
+ * shared (and in which room); your name (GitHub username) and colour are global.
  * Everything lives in this browser's localStorage.
  */
 

@@ -1,4 +1,4 @@
-import { Files, ListTree, History, Cpu, Settings, Keyboard, CircleHelp, GitBranch, Home, MessageSquareText } from 'lucide-react';
+import { Files, ListTree, History, Cpu, Settings, Keyboard, CircleHelp, GitBranch, Home, MessageSquareText, Users } from 'lucide-react';
 import { useStore, setState, openDialog, type SidebarView } from '../state/store';
 import { FileTree } from './FileTree';
 import { OutlinePanel } from './OutlinePanel';
@@ -24,6 +24,8 @@ export function ActivityBar() {
   const scmCount = useStore((s) => (s.scm ? s.scm.staged.length + s.scm.changes.length + s.scm.conflicts.length : 0));
   const update = useStore((s) => s.update);
   const hasUpdate = !!update?.updateAvailable;
+  const project = useStore((s) => s.project);
+  const collab = useStore((s) => s.collab);
   const btn = (active: boolean, label: string, icon: React.ReactNode, onClick: () => void, badge = 0) => (
     <button
       key={label}
@@ -47,7 +49,13 @@ export function ActivityBar() {
     <nav className="hidden w-12 shrink-0 flex-col items-center gap-1 border-r border-line bg-panel py-2 sm:flex" aria-label="Sidebar views">
       {btn(false, 'All projects', <Home className="size-[18px]" />, () => void closeProject())}
       <div className="my-1 h-px w-6 bg-line" />
-      {VIEWS.map((v) => btn(sidebar === v.id, v.label, v.icon, () => setState({ sidebar: sidebar === v.id ? null : v.id }), v.id === 'review' ? reviewCount : v.id === 'git' ? scmCount : 0))}
+      {VIEWS.map((v) => [
+        // Live collaboration sits just above the compiler; a dot (or the number of peers) shows the project is shared.
+        v.id === 'engine' && project
+          ? btn(false, collab ? `Live collaboration: room ${collab.room} (${collab.status})` : 'Live collaboration', <Users className="size-[18px]" />, () => openDialog({ type: 'collab' }), collab ? collab.peers.length || -1 : 0)
+          : null,
+        btn(sidebar === v.id, v.label, v.icon, () => setState({ sidebar: sidebar === v.id ? null : v.id }), v.id === 'review' ? reviewCount : v.id === 'git' ? scmCount : 0),
+      ])}
       <div className="flex-1" />
       {btn(false, 'Help & templates', <CircleHelp className="size-[18px]" />, () => newProjectDialog())}
       {btn(false, 'Keyboard shortcuts', <Keyboard className="size-[18px]" />, () => openDialog({ type: 'shortcuts' }))}

@@ -156,8 +156,7 @@ export async function openProject(id: string) {
   }
   void refreshScm();
   const collab = readCollabConfig(next.project.id);
-  const user = readCollabUser();
-  if (collab.enabled && collab.host && collab.token && user.name) startCollab(next, collab, user);
+  if (collab.enabled && collab.host && collab.token) void rejoinCollab(next, collab);
   // Show the PDF from the last build straight away, as the classic UI did.
   void showExistingPdf(next);
   void warmUpEngine();
@@ -217,6 +216,17 @@ export async function joinCollab(config: CollabConfig, user: CollabUser) {
   writeCollabConfig(ws.project.id, { ...config, enabled: true });
   await ws.flush();
   startCollab(ws, { ...config, enabled: true }, user);
+}
+
+/** Reconnect a shared project on open, signed with the current GitHub username. */
+async function rejoinCollab(project: Workspace, config: CollabConfig) {
+  const user = readCollabUser();
+  const login = await server.scm.githubUser().then((r) => r.login, () => null);
+  if (login && login !== user.name) {
+    user.name = login;
+    writeCollabUser(user);
+  }
+  if (user.name && ws === project) startCollab(project, config, user);
 }
 
 /** Stop sharing the open project. Files stay as they are on disk. */

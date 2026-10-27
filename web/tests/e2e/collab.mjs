@@ -69,11 +69,12 @@ async function person(base, name) {
 }
 
 async function join(p) {
+  // Both people run on this machine, so give each their own GitHub username.
+  await p.page.route('**/api/scm/github-user', (r) => r.fulfill({ json: { login: p.name } }));
   await p.page.getByRole('button', { name: 'Live collaboration' }).click();
   await p.page.getByLabel('Server').fill(relay);
   await p.page.getByLabel('Room').fill(ROOM);
   await p.page.getByLabel('Token').fill(token);
-  await p.page.getByLabel('Your name').fill(p.name);
   await p.page.getByRole('button', { name: 'Share live' }).click();
   return until(async () => (await p.state())?.status === 'connected', `${p.name} connected`);
 }
