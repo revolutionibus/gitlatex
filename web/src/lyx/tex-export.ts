@@ -9,6 +9,7 @@
  * definitions that new content needs are added to the preamble.
  */
 import { FRONT, HEAD_CMD, LISTS, SC, SIZE_TEX, THM, ENVS, headLevel, isTextBlock, latexOf, stripEnv } from './model';
+import { cellBody, rowsOf } from './tabular';
 import type { Chunk } from './tex-import';
 
 /** What the generated LaTeX needs from the preamble. */
@@ -140,12 +141,35 @@ function insetTex(n: HTMLElement, F: Needs): string {
       return '\\caption' + (d.opt != null ? '[' + d.opt + ']' : '') + '{' + inlineTex(body!, F).trim() + '}';
     case 'Float': {
       const env = (d.float || 'figure') + (d.star ? '*' : '');
-      return '\\begin{' + env + '}' + (d.opt ? '[' + d.opt + ']' : '') + '\n' + inlineTex(body!, F).trim() + '\n\\end{' + env + '}';
+      return '\\begin{' + env + '}' + (d.opt ? '[' + d.opt + ']' : '') + '\n' + (d.centering ? '\\centering\n' : '') + inlineTex(body!, F).trim() + '\n\\end{' + env + '}';
     }
+    case 'Sym':
+      return d.tex || '';
+    case 'Tabular':
+      return tabularTex(n, F);
     case 'Raw':
       return d.raw ? d.raw : '';
   }
   return '';
+}
+
+function tabularTex(n: HTMLElement, F: Needs): string {
+  const d = n.dataset;
+  const env = d.env || 'tabular';
+  const out = ['\\begin{' + env + '}' + (d.args || '') + '{' + (d.spec || '') + '}'];
+  for (const tr of rowsOf(n)) {
+    if (tr.dataset.rules) out.push(tr.dataset.rules);
+    const cells = [...tr.cells].map((td) => {
+      // a line break inside a cell must not end the row
+      const t = inlineTex(cellBody(td), F).trim().replace(/\\\\\n/g, '\\newline{}');
+      return td.dataset.mc != null ? `\\multicolumn{${td.colSpan}}{${td.dataset.mc}}{${t}}` : t;
+    });
+    const end = tr.dataset.end ?? '\\\\';
+    out.push(cells.join(' & ') + (end ? ' ' + end : ''));
+  }
+  if (d.after) out.push(d.after);
+  out.push('\\end{' + env + '}');
+  return out.join('\n');
 }
 
 /** The environment a block's layout is written in (`thm` when the preamble calls Theorem that). */

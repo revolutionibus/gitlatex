@@ -193,9 +193,10 @@ const ATOM_TEXT: Record<string, (a: Record<string, string>) => string> = {
   Raw: (a) => '[' + (a.kind || 'inset') + ']',
   Cite: (a) => '[' + (a.keys || '').split(',').map((k) => k.trim()).join(', ') + ']',
   Graphics: (a) => a.path,
+  Sym: (a) => a.glyph,
 };
 
-/** An inset with no editable body: Label, Ref, Href, Cite, Graphics, Raw. */
+/** An inset with no editable body: Label, Ref, Href, Cite, Graphics, Sym (a symbol command shown as its glyph), Raw. */
 export function mkAtom(type: string, attrs: Record<string, string> = {}): HTMLSpanElement {
   const s = document.createElement('span');
   s.className = 'inset atom' + (type === 'Raw' ? ' raw' : '');

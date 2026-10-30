@@ -13,6 +13,7 @@ import {
   HEAD_CMD, HEAD_NAMES, KNOWN, LAYOUT_GROUPS, THM, ZW, TEX_SIZE, envWrap, ENVVIS,
   mkAtom, mkBlock, mkDisplay, mkERT, mkInset, mkLB, mkMath, mkSC, mkSpecial,
 } from './model';
+import { TABULAR_ENVS, mkTabular, type TabCell } from './tabular';
 
 export interface Chunk {
   /** The chunk's source text. */
@@ -216,6 +217,8 @@ const FRONT_CMDS: Record<string, string> = { title: 'Title', author: 'Author', d
 const BLOCK_CMDS = new Set(['maketitle', 'tableofcontents', 'newpage', 'clearpage', 'cleardoublepage', 'pagebreak', 'appendix', 'bibliography', 'bibliographystyle', 'printbibliography', 'input', 'include', 'par']);
 
 const ACCENT: Record<string, string> = { "'": '́', '`': '̀', '^': '̂', '"': '̈', '~': '̃', '=': '̄', '.': '̇', c: '̧', v: '̌', u: '̆', H: '̋', r: '̊', k: '̨' };
+/** Symbol commands from packages (amssymb, pifont…): shown as the glyph, written back as the command. */
+const GLYPH: Record<string, string> = { checkmark: '\u2713', cmark: '\u2713', xmark: '\u2717' };
 const SYMBOL: Record<string, string> = {
   textbackslash: '\\', textasciitilde: '~', textasciicircum: '^', textless: '<', textgreater: '>', textbar: '|', textbraceleft: '{', textbraceright: '}',
   textendash: '–', textemdash: '—', textquoteleft: '‘', textquoteright: '’', textquotedblleft: '“', textquotedblright: '”',
@@ -251,6 +254,108 @@ function span(cls: string) {
   const s = document.createElement('span');
   s.className = cls;
   return s;
+}
+
+/* ---------- Tables ---------- */
+
+/** Rules between rows: \hline, \cline{…}, booktabs rules, comment lines. */
+const RULE_RE = /^\s*(?:\\(?:hline|toprule|midrule|bottomrule)(?![a-zA-Z])(?:\s*\[[^\]]*\])?|\\(?:cline|cmidrule)(?:\s*\([^)]*\))?\s*\{[^}]*\}|\\(?:addlinespace|specialrule)(?![a-zA-Z])(?:\s*\[[^\]]*\])?(?:\s*\{[^}]*\})*|%[^\n]*(?:\n|$))/;
+
+/** A tabular body → rows of cell sources, with the rules before each row and after the last. */
+function splitTabular(body: string): { rows: { rules: string; cells: string[]; end: string }[]; after: string } {
+  const rows: { rules: string; cells: string[]; end: string }[] = [];
+  let i = 0;
+  for (;;) {
+    const rules: string[] = [];
+    for (let m = RULE_RE.exec(body.slice(i)); m; m = RULE_RE.exec(body.slice(i))) {
+      rules.push(m[0].trim());
+      i += m[0].length;
+    }
+    const cells: string[] = [];
+    let cs = i;
+    let end: string | null = null;
+    while (i < body.length && end === null) {
+      const c = body[i];
+      if (c === '\\' && body[i + 1] === '\\') {
+        // the end of the row: \\, \\*, \\[2pt]
+        cells.push(body.slice(cs, i));
+        let j = i + 2;
+        if (body[j] === '*') j++;
+        let k = j;
+        while (body[k] === ' ' || body[k] === '\t') k++;
+        if (body[k] === '[') j = matchBracket(body, k) + 1;
+        end = body.slice(i, j);
+        i = j;
+      } else if (c === '\\') {
+        const bm = /^\\begin\s*\{([^}]*)\}/.exec(body.slice(i, i + 80));
+        i = bm ? matchEnd(body, i + bm[0].length, bm[1]) : i + 2;
+      } else if (c === '{') i = matchBrace(body, i) + 1;
+      else if (c === '%') i = eol(body, i) + 1;
+      else if (c === '&') {
+        cells.push(body.slice(cs, i));
+        cs = ++i;
+      } else i++;
+    }
+    if (end === null) {
+      const last = body.slice(cs);
+      if (!cells.length && !last.trim()) return { rows, after: rules.join(' ') };
+      cells.push(last);
+      rows.push({ rules: rules.join(' '), cells, end: '' });
+      return { rows, after: '' };
+    }
+    rows.push({ rules: rules.join(' '), cells, end });
+  }
+}
+
+function tabCell(src: string, ctx: Ctx): TabCell {
+  let t = src.trim();
+  let span: number | undefined;
+  let mc: string | undefined;
+  const m = /^\\multicolumn\s*\{\s*(\d+)\s*\}\s*\{/.exec(t);
+  if (m) {
+    const r = new Reader(t);
+    r.i = m[0].length - 1;
+    const spec = r.group();
+    r.wsInline();
+    if (t[r.i] === '{') {
+      const inner = r.group();
+      if (!t.slice(r.i).trim()) {
+        span = +m[1];
+        mc = spec;
+        t = inner.trim();
+      }
+    }
+  }
+  const body = document.createDocumentFragment();
+  parseInline(t, body, ctx);
+  return { body, span, mc };
+}
+
+/** A table environment whose name ends at `i`, as a table inset (null when it cannot be read as one). */
+function readTabular(s: string, i: number, env: string, ctx: Ctx): { node: HTMLElement; end: number } | null {
+  const r = new Reader(s);
+  r.i = i;
+  if (env !== 'tabular') {
+    // the width of tabular*, tabularx, tabulary
+    r.wsInline();
+    if (s[r.i] !== '{') return null;
+    r.group();
+  }
+  const save = r.i;
+  r.wsInline();
+  if (s[r.i] === '[') r.opt();
+  else r.i = save;
+  const args = s.slice(i, r.i).trim();
+  r.wsInline();
+  if (s[r.i] !== '{') return null;
+  const spec = r.group();
+  const end = matchEnd(s, r.i, env);
+  const em = /\\end\s*\{[^}]*\}$/.exec(s.slice(r.i, end));
+  if (!em) return null;
+  const { rows, after } = splitTabular(s.slice(r.i, end - em[0].length));
+  if (!rows.length) return null;
+  const node = mkTabular(env, args, spec, rows.map((row) => ({ rules: row.rules, end: row.end, cells: row.cells.map((c) => tabCell(c, ctx)) })), after);
+  return { node, end };
 }
 
 /* ---------- Inline content ---------- */
@@ -482,6 +587,9 @@ function parseInline(src: string, out: Node, ctx: Ctx) {
         while (src[r.i] === ' ') r.i++;
       }
       buf += SYMBOL[name];
+    } else if (GLYPH[name] && !star) {
+      if (src.startsWith('{}', r.i)) r.i += 2;
+      put(mkAtom('Sym', { tex: src.slice(start, r.i), glyph: GLYPH[name] }));
     } else if (ACCENT[name] && name.length === 1 && accentArg(r)) {
       buf += accentArg(r, true);
     } else if (name === 'begin') {
@@ -496,6 +604,12 @@ function parseInline(src: string, out: Node, ctx: Ctx) {
         // display math inside inline content (a footnote, a caption): keep it as code
         r.i = matchEnd(src, r.i, envName);
         put(mkERT(src.slice(start, r.i)));
+        continue;
+      }
+      const tab = TABULAR_ENVS.test(envName) ? readTabular(src, r.i, envName, ctx) : null;
+      if (tab) {
+        r.i = tab.end;
+        put(tab.node);
         continue;
       }
       r.i = matchEnd(src, r.i, envName);
@@ -731,15 +845,25 @@ function parseOne(r: Reader, ctx: Ctx, frame: Frame, out: HTMLElement[], layout:
         if (s[r.i] === '[') opt = r.opt();
         else r.i = save;
         const end = matchEnd(s, r.i, env);
-        const inner = s.slice(r.i, end).replace(new RegExp(`\\\\end\\s*\\{${base}\\*?\\}$`), '');
+        let inner = s.slice(r.i, end).replace(new RegExp(`\\\\end\\s*\\{${base}\\*?\\}$`), '').trim();
         r.i = end;
+        // the float shows its content centred anyway
+        const centering = /^\\centering(?![a-zA-Z])\s*/.exec(inner);
+        if (centering) inner = inner.slice(centering[0].length);
         const body = document.createDocumentFragment();
-        parseInline(inner.trim(), body, ctx);
+        parseInline(inner, body, ctx);
         const ins = mkInset('Float', base, body);
+        if (centering) ins.dataset.centering = '1';
         if (opt) ins.dataset.opt = opt;
         if (env.endsWith('*')) ins.dataset.star = '1';
         const b = mkBlock('Standard', ins);
         out.push(stamp(b));
+        return;
+      }
+      const tab = TABULAR_ENVS.test(env) ? readTabular(s, bodyStart, env, ctx) : null;
+      if (tab) {
+        r.i = tab.end;
+        out.push(stamp(mkBlock('Standard', tab.node)));
         return;
       }
       // any other environment: TeX code

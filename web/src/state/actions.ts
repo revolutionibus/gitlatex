@@ -761,8 +761,8 @@ export async function compile(opts: { clean?: boolean; reason?: 'manual' | 'auto
       ...(backend !== 'browser' ? { console: result.transcript } : {}),
     });
     applyMarkers();
-    // a compile the user asked for shows where they are writing in the new PDF
-    if (opts.reason === 'manual' && pdf && synctex) followCursor(synctex);
+    // a compile from writing (manual or auto) shows where the cursor is in the new PDF
+    if (opts.reason !== 'open' && pdf && synctex) followCursor(synctex);
     if (result.fetched.length) {
       const labels = new Map((getState().engine.info?.collections ?? []).map((c) => [c.id, c.label.replace(/\s*\(.*\)$/, '')]));
       const names = result.fetched.map((f) => labels.get(f) ?? f.replace(/^font:/, ''));

@@ -244,3 +244,9 @@
 .lyx-root .zot-empty { padding: 18px; text-align: center; color: var(--chrome-muted); }
 .lyx-root .zot-empty.err { color: var(--ert); }
 .lyx-root .dlg-buttons button:disabled { opacity: .5; }
+/* tables: rules and column lines are drawn by paintTabular (tabular.ts); dotted lines show the cells */
+.lyx-root .inset[data-inset="Tabular"] { display: inline-block; vertical-align: middle; max-width: 100%; overflow-x: auto; border: 0; padding: 0; margin: 2px 1px; text-align: initial; }
+.lyx-root .inset[data-inset="Tabular"] > table { border-collapse: collapse; }
+.lyx-root .inset[data-inset="Tabular"] td { padding: 2px 8px; min-width: 2em; vertical-align: top; outline: 1px dotted var(--inset-line); outline-offset: -1px; }
+.lyx-root .inset[data-inset="Tabular"] td > .ibody { display: block; min-height: 1.3em; white-space: normal; }
+.lyx-root .atom[data-inset="Sym"] { border: 0; padding: 0; margin: 0; font: inherit; color: inherit; }

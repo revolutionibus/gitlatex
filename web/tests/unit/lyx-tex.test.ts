@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { parseTex, macrosOf, theoremsOf } from '../../src/lyx/tex-import';
 import { exportTex, genRun, ensurePreamble } from '../../src/lyx/tex-export';
 import { latexOf, mkBlock } from '../../src/lyx/model';
+import { tabularOp } from '../../src/lyx/tabular';
 
 const DOC = String.raw`\documentclass[11pt]{article}
 \usepackage{amsmath,amsthm}
@@ -90,9 +91,9 @@ describe('LyX-style editor: LaTeX round trip', () => {
     const float = blocks().find((b) => b.querySelector('[data-inset="Float"]'))!;
     expect(float.querySelector('[data-inset="Graphics"]')?.getAttribute('data-path')).toBe('fig/plot.png');
     expect(float.querySelector('[data-inset="Caption"]')).not.toBeNull();
+    const table = blocks().find((b) => b.querySelector('[data-inset="Tabular"]'))!;
+    expect([...table.querySelectorAll('td')].map((td) => td.textContent)).toEqual(['a', 'b']);
     // unknown constructs are TeX code, kept verbatim
-    const ert = blocks().find((b) => b.textContent!.includes('tabular'))!;
-    expect(ert.querySelector('[data-inset="ERT"] .ibody')!.textContent).toBe('\\begin{tabular}{cc}\na & b \\\\\n\\end{tabular}');
     expect(blocks().some((b) => b.querySelector('.ibody')?.textContent === '% Introduction starts here')).toBe(true);
   });
 
@@ -144,5 +145,79 @@ describe('LyX-style editor: LaTeX round trip', () => {
   it('turns accents and quotes into characters', () => {
     const { blocks } = load("Universit\\'e de ``Paris'' -- Orsay\n");
     expect(blocks()[0].textContent).toBe('Université de \u201cParis\u201d -- Orsay');
+  });
+});
+
+describe('LyX-style editor: tables', () => {
+  const TABLE = String.raw`\begin{table}[h]
+\centering
+\begin{tabular}{|l|c|r|}
+\hline
+Name & \multicolumn{2}{c|}{Score} \\ \hline\hline
+Ann & $x^2$ & \textbf{9} \\[2pt]
+\cline{2-3}
+Bob & 1 & 2 \\
+\hline
+\end{tabular}
+\caption{Results}
+\end{table}
+`;
+  const tab = (ed: HTMLElement) => ed.querySelector<HTMLElement>('[data-inset="Tabular"]')!;
+  const cells = (ed: HTMLElement) => [...tab(ed).querySelectorAll('tr')].map((tr) => [...tr.cells].map((td) => td.textContent));
+
+  it('reads a tabular as a table inset and writes it back unchanged', () => {
+    const { ed, save } = load(TABLE);
+    expect(tab(ed).closest('[data-inset="Float"]')).not.toBeNull();
+    expect(cells(ed)).toEqual([['Name', 'Score'], ['Ann', 'x^2', '9'], ['Bob', '1', '2']]);
+    const [head, ann] = tab(ed).querySelectorAll('tr');
+    expect(head.cells[1].colSpan).toBe(2);
+    expect(ann.querySelector('math-field')).not.toBeNull();
+    expect(head.cells[0].style.borderTop).toContain('solid');
+    expect(head.cells[0].style.borderLeft).toContain('solid');
+    expect(ann.cells[0].style.textAlign).toBe('left');
+    expect(save()).toBe(TABLE);
+  });
+
+  it('writes an edited table with its rules and multicolumns', () => {
+    const { ed, save } = load(TABLE);
+    tab(ed).querySelectorAll('tr')[2].cells[0].querySelector('.ibody')!.textContent = 'Bo & Co';
+    expect(save()).toContain(String.raw`\begin{tabular}{|l|c|r|}
+\hline
+Name & \multicolumn{2}{c|}{Score} \\
+\hline \hline
+Ann & $x^2$ & \textbf{9} \\[2pt]
+\cline{2-3}
+Bo \& Co & 1 & 2 \\
+\hline
+\end{tabular}`);
+  });
+
+  it('adds and deletes rows and columns', () => {
+    const { ed, save } = load('\\begin{tabular}{|c|c|}\n\\hline\na & b \\\\\n\\hline\n\\end{tabular}\n');
+    const t = tab(ed);
+    const a = t.querySelector('td')!;
+    tabularOp(t, a, 'append-row');
+    tabularOp(t, a, 'append-column');
+    expect(cells(ed)).toEqual([['a', '\u200B', 'b'], ['\u200B', '\u200B', '\u200B']]);
+    expect(t.dataset.spec).toBe('|c|c|c|');
+    tabularOp(t, t.querySelectorAll('tr')[1].cells[0], 'delete-row');
+    tabularOp(t, a, 'delete-column');
+    expect(cells(ed)).toEqual([['\u200B', 'b']]);
+    expect(save()).toBe('\\begin{tabular}{|c|c|}\n\\hline\n & b \\\\\n\\hline\n\\end{tabular}\n');
+  });
+
+  it('shows symbol commands as glyphs and keeps the float\'s \\centering', () => {
+    const src = '\\begin{table}[t]\n\\centering\n\\begin{tabular}{lc}\n\\toprule\nGR & \\checkmark \\\\\n\\bottomrule\n\\end{tabular}\n\\end{table}\n';
+    const { ed, save } = load(src);
+    expect(ed.querySelector('[data-inset="ERT"]')).toBeNull();
+    expect(cells(ed)).toEqual([['GR', '\u2713']]);
+    tab(ed).querySelector('td .ibody')!.textContent = 'General relativity';
+    expect(save()).toBe(src.replace('GR', 'General relativity'));
+  });
+
+  it('keeps tables it cannot read as TeX code', () => {
+    const { blocks, save } = load('\\begin{tabular}{cc\na & b\n');
+    expect(blocks()[0].querySelector('[data-inset="Tabular"]')).toBeNull();
+    expect(save()).toBe('\\begin{tabular}{cc\na & b\n');
   });
 });

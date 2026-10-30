@@ -15,6 +15,7 @@ import {
 import { parseTex, registerTheorems, theoremsOf, macrosOf } from './tex-import';
 import { exportTex, genRun, inlineTex as texInline } from './tex-export';
 import { BIND_TEXT } from './bindings';
+import { cellBodies, cellBody, newTabular, rowsOf, tabularOp } from './tabular';
 
 export interface LyxHost {
   /** The file's name, for exports and the documents list. */
@@ -889,19 +890,32 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
       if (rest.replace(/\u200B/g, '') !== '') return null;
       sib = fwd ? n.nextSibling : n.previousSibling;
       while (sib && sib.nodeType === 3 && sib.data.replace(/\u200B/g, '') === '') sib = fwd ? sib.nextSibling : sib.previousSibling;
-      if (!sib && n.parentElement.classList.contains('ibody')) return { exit: n.parentElement.parentElement };
+      if (!sib && n.parentElement.classList.contains('ibody')) return leaveBody(n.parentElement, fwd);
     } else {
       sib = fwd ? n.childNodes[o] : n.childNodes[o - 1];
-      if (!sib && n.classList && n.classList.contains('ibody')) return { exit: n.parentElement };
+      if (!sib && n.classList && n.classList.contains('ibody')) return leaveBody(n, fwd);
     }
     if (sib && sib.nodeType === 1 && (sib.classList.contains('mwrap') || (sib.classList.contains('inset') && !sib.classList.contains('atom') && !sib.classList.contains('collapsed')))) return { enter: sib };
     return null;
+  }
+  /** Past the edge of an inset body: out of the inset, or into the next cell of a table. */
+  function leaveBody(ib, fwd) {
+    const tab = ib.parentElement.tagName === 'TD' ? ib.closest('.inset[data-inset="Tabular"]') : null;
+    if (!tab) return { exit: ib.parentElement };
+    const cells = cellBodies(tab), k = cells.indexOf(ib) + (fwd ? 1 : -1);
+    return k >= 0 && k < cells.length ? { cell: cells[k] } : { exit: tab };
+  }
+  /** The table cell the caret is in. */
+  function currentCell() {
+    const ib = inIbody();
+    return ib && ib.parentElement.tagName === 'TD' ? ib.parentElement : null;
   }
   function enterAtom(a, fwd) {
     if (a.exit) { caretBeside(a.exit, fwd); return; }
     const el = a.enter;
     if (el.classList.contains('mwrap')) { focusMath(el.firstChild, fwd ? 'start' : 'end'); return; }
-    const body = el.querySelector('.ibody');
+    if (el.dataset.inset === 'Tabular') { const cells = cellBodies(el); enterAtom({ cell: fwd ? cells[0] : cells[cells.length - 1] }, fwd); return; }
+    const body = a.cell || el.querySelector('.ibody');
     if (!body.firstChild) body.textContent = ZW;
     if (fwd) { const f = body.firstChild; if (f.nodeType === 3) setCaret(f, f.data.startsWith(ZW) ? 1 : 0); else setCaret(body, 0); }
     else { const l = body.lastChild; if (l.nodeType === 3) setCaret(l, l.data.length); else setCaret(body, body.childNodes.length); }
@@ -927,7 +941,14 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
       if (ib) { if (ib.parentElement.dataset.inset === 'ERT') insertPlain('\n'); return; }
       paragraphBreak(false); return;
     }
-    if (e.key === 'Tab' && plain) { e.preventDefault(); return; }
+    if (e.key === 'Tab' && plain) {
+      e.preventDefault();
+      const td = currentCell(); if (!td) return;
+      const tab = td.closest('.inset[data-inset="Tabular"]'), cells = cellBodies(tab), k = cells.indexOf(cellBody(td)) + (e.shiftKey ? -1 : 1);
+      if (k >= 0 && k < cells.length) enterAtom({ cell: cells[k] }, true);
+      else if (!e.shiftKey) tableCmd('append-row', rowsOf(tab).pop().cells[0]);
+      return;
+    }
     if (e.key === ' ' && plain && !e.shiftKey && spaceBlocked()) { e.preventDefault(); return; }
     if (e.key === '"' && plain && !(ib && ib.parentElement.dataset.inset === 'ERT')) { e.preventDefault(); insertPlain(smartQuote(false)); return; }
     if (e.key === '$' && plain && prefs.dollarMath && !ib) { e.preventDefault(); run('math-mode'); return; }
@@ -2147,6 +2168,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
         if (t === 'Foot') s += '[footnote: ' + plainExportOf(n.querySelector('.ibody')).trim() + ']';
         else if (t === 'URL') s += plainExportOf(n.querySelector('.ibody'));
         else if (t === 'Ref' || t === 'Href') s += n.textContent;
+        else if (t === 'Tabular') s += '\n' + rowsOf(n).map(tr => [...tr.cells].map(td => plainExportOf(cellBody(td)).trim()).join('\t')).join('\n') + '\n';
         continue;
       }
       if (n.tagName === 'BR') continue;
@@ -2176,6 +2198,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
         else if (t === 'Ref') s += esc(n.textContent);
         else if (t === 'Label') s += `<a id="${esc(n.dataset.name)}"></a>`;
         else if (t === 'Note' && n.dataset.note === 'Greyedout') s += `<span style="color:gray">${inlineHtml(n.querySelector('.ibody'), notes)}</span>`;
+        else if (t === 'Tabular') s += '<table style="border-collapse:collapse;display:inline-table">' + rowsOf(n).map(tr => '<tr>' + [...tr.cells].map(td => `<td${td.colSpan > 1 ? ` colspan="${td.colSpan}"` : ''} style="${esc(td.getAttribute('style') || '')};padding:2px 8px">${inlineHtml(cellBody(td), notes)}</td>`).join('') + '</tr>').join('') + '</table>';
         continue;
       }
       if (n.tagName === 'BR') continue;
@@ -2553,17 +2576,33 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     enterAtom({ enter: cap }, true);
     status(kind === 'table' ? 'Table float inserted: type the caption, then add the table inside the float.' : 'Figure float inserted: type the caption, and insert graphics inside the float.');
   }
+  /** `inset-modify tabular <op>` in the table cell `td` (the caret's by default). */
+  function tableCmd(op, td = currentCell()) {
+    if (!td) return false;
+    const tab = td.closest('.inset[data-inset="Tabular"]');
+    pushUndo();
+    const to = tabularOp(tab, td, op);
+    if (!to) { status('Command disabled'); return true; }
+    refresh(); markDirty();
+    enterAtom({ cell: to }, true);
+    return true;
+  }
   async function tableDialog() {
     const res = await openDialog({ title: 'Insert Table', body: `
       <label class="row"><span>Rows:</span><input type="number" name="r" value="3" min="1" max="50"></label>
       <label class="row"><span>Columns:</span><input type="number" name="c" value="3" min="1" max="20"></label>
-      <p class="hint">The table is inserted as TeX code (a tabular environment) that you can fill in.</p>`, buttons: [['Cancel', ''], ['Insert', 'ok', true]] });
+      <p class="hint">Tab moves to the next cell; Edit ▸ Rows &amp; Columns adds and deletes them.</p>`, buttons: [['Cancel', ''], ['Insert', 'ok', true]] });
     if (res.value !== 'ok') return;
     const rows = Math.max(1, Math.min(50, +res.form.r.value || 3)), cols = Math.max(1, Math.min(20, +res.form.c.value || 3));
-    const row = Array.from({ length: cols }, () => ' ').join('&') + '\\\\';
-    const t = ['\\begin{tabular}{|' + 'c|'.repeat(cols) + '}', '\\hline', ...Array.from({ length: rows }, () => row + ' \\hline'), '\\end{tabular}'].join('\n');
-    const b = mkBlock('Standard', mkERT(t)); b.dataset.ert = '1';
-    insertBlockAfter(b);
+    const tab = newTabular(rows, cols);
+    const ib = inIbody(), r = selRange(true);
+    if (ib && r && ib.parentElement.dataset.inset === 'Float') {
+      // inside a table float: the table goes where the caret is
+      pushUndo();
+      r.collapse(true); r.insertNode(tab);
+      refresh(); markDirty();
+    } else insertBlockAfter(mkBlock('Standard', tab));
+    enterAtom({ enter: tab }, true);
   }
   async function bibtexInsert() {
     const files = host.bibFiles();
@@ -2974,7 +3013,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     'math-matrix': { run: a => { const [r, c] = (a || '2 2').split(/\s+/).map(Number); const body = Array.from({ length: r || 2 }, (_, i) => Array.from({ length: c || 2 }, (_, j) => (i + j === 0 ? '#@' : '#?')).join('&')).join('\\\\'); mathInsert(`\\begin{matrix}${body}\\end{matrix}`); }, en: () => inTextCtx() || inMathCtx() },
     'math-font-style': { run: a => { if (a === 'mathnormal') return; mathFont('\\' + (a === 'textnormal' ? 'text' : a)); }, en: a => inMathCtx() && MATH_FONT_OK.includes(a) && a !== 'mathnormal' },
     'math-keyboard': { run: () => { const kb = window.mathVirtualKeyboard; if (!kb) return; if (kb.visible) kb.hide(); else { if (!activeMath()) insertInlineMath(); setTimeout(() => kb.show(), 80); } } },
-    'inset-modify': { run: a => { const map = { 'tabular append-row': 'addRowAfter', 'tabular append-column': 'addColumnAfter', 'tabular delete-row': 'removeRow', 'tabular delete-column': 'removeColumn' }; if (map[a]) mathCmd(map[a]); }, en: a => inMathCtx() && /^tabular (append|delete)-(row|column)$/.test(a) },
+    'inset-modify': { run: a => { if (!activeMath() && tableCmd(a.replace(/^tabular /, ''))) return; const map = { 'tabular append-row': 'addRowAfter', 'tabular append-column': 'addColumnAfter', 'tabular delete-row': 'removeRow', 'tabular delete-column': 'removeColumn' }; if (map[a]) mathCmd(map[a]); }, en: a => /^tabular (append|delete)-(row|column)$/.test(a) && (inMathCtx() || !!currentCell()) },
   };
   delete H['dialog-show print']; delete H['changes-track']; delete H['dialog-show spellchecker']; delete H['thesaurus-entry'];
   const DIALOGS = {
