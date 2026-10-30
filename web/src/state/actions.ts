@@ -719,6 +719,7 @@ async function buildLocally(current: Workspace): Promise<Built> {
   const notices = [
     ...(res.error && !pdf ? [res.error] : []),
     ...(res.steps ?? []).filter((st) => st.missing).map((st) => `${st.tool} is not installed, so citations stay unresolved.`),
+    ...[...new Set((res.steps ?? []).filter((st) => st.message).map((st) => `${st.tool} failed, so citations stay unresolved: ${st.message}`))],
   ];
   return {
     status: !pdf ? 'failed' : hasErrors ? 'errors' : /LaTeX Warning|Package \w+ Warning/.test(log) ? 'warnings' : 'success',

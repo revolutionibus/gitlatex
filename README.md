@@ -242,7 +242,10 @@ powers VS Code.
 - **One click to PDF**, with the result shown in a pane beside the editor.
 - **Full multi-pass builds** — the engine runs, `biber` or `bibtex` runs when your
   document needs it, then the engine reruns until cross-references and citations
-  settle. No more compiling three times by hand to clear `??`.
+  settle. No more compiling three times by hand to clear `??`. Like `latexmk`, it
+  reruns only while the files TeX reads back (`.aux`, `.toc`, `.bbl`…) change,
+  runs `biber`/`bibtex` only when your citations or `.bib` files changed, and
+  XeLaTeX writes the PDF once at the end, so an ordinary edit compiles in one pass.
 - **Choose your engine**: `pdflatex`, `xelatex` or `lualatex`.
 - **A real problems list.** Errors and warnings are parsed out of the LaTeX log
   into a clickable list — click one to jump straight to the line, with squiggles
@@ -420,6 +423,7 @@ Projects live in `./repos` unless you pass `--repos`.
 | --- | --- |
 | Compile fails immediately | Install a LaTeX distribution and make sure `pdflatex` is on your `PATH`. |
 | Citations show as `??` | Install `biber` (for `biblatex`) or `bibtex` with your TeX distribution. |
+| "biber failed … biber and biblatex versions are incompatible" | `biber` comes from a different TeX installation than your engine (e.g. MacTeX's `biber` with Homebrew's `texlive`). Use one installation for both, or use `\usepackage[backend=bibtex]{biblatex}`. Check with `which xelatex biber`. |
 | Port already in use | Run on another port: `gitlatex --port 3000`. |
 | Show in PDF / double-click says "No SyncTeX data" | Compile first. With a Compiler API, the API must return `synctex` alongside the PDF — see **Settings → Compiler API**. |
 | Comments are signed "Anonymous" | Set your git identity: `git config --global user.name "Your Name"`. |

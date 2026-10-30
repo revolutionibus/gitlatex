@@ -116,7 +116,8 @@ export interface LocalCompileResult {
   success?: boolean;
   error?: string;
   log?: string;
-  steps?: { tool: string; missing?: boolean }[];
+  /** `message`: why a bibliography tool failed (e.g. biber and biblatex versions that do not match). */
+  steps?: { tool: string; missing?: boolean; exitCode?: number; message?: string }[];
   engine?: string;
 }
 
