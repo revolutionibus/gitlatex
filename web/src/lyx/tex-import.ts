@@ -1203,3 +1203,9 @@ function stripComments(s: string) {
 }
 
 export { ZW };
+
+/** The directories of `\graphicspath{{a/}{b/}}`, in order. */
+export function graphicsPaths(tex: string): string[] {
+  const m = /^[^%\n]*?\\graphicspath\s*\{((?:\s*\{[^{}]*\})*)\s*\}/m.exec(tex);
+  return m ? [...m[1].matchAll(/\{([^{}]*)\}/g)].map((d) => d[1].trim()).filter(Boolean) : [];
+}

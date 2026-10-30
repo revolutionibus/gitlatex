@@ -262,7 +262,9 @@ biblatex).
 - **Graphics:** the 🖼 button or **Insert → Graphics…**. Pick an image of the
   project (drop image files on the file tree to add them), a width in percent
   of the line, and optionally more `\includegraphics` options. Images are
-  shown in the document at that width. PDF and EPS images are shown by name.
+  shown in the document at that width, PDF figures as their first page. A path
+  without an extension (`\includegraphics{plot}`) and the folders of
+  `\graphicspath` are looked up as LaTeX does. EPS images are shown by name.
 - **Figure float:** the 🖼+ button or **Insert → Float → Figure**. You get a
   *Figure* box with a caption to type into; insert the graphic inside it.
   Figures and their captions are numbered (*Figure 1:*), and a label inside
@@ -492,7 +494,7 @@ browser.
   split view.
 - Editing a formula writes it as MathLive serializes it (for example
   `\frac12` becomes `\frac{1}{2}`). The PDF is the same.
-- PDF and EPS images are shown by name, not as a picture.
+- EPS images are shown by name, not as a picture.
 
 ## For developers
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parseTex, macrosOf, theoremsOf } from '../../src/lyx/tex-import';
+import { parseTex, macrosOf, theoremsOf, graphicsPaths } from '../../src/lyx/tex-import';
 import { exportTex, genRun, ensurePreamble } from '../../src/lyx/tex-export';
 import { latexOf, mkBlock } from '../../src/lyx/model';
 import { tabularOp } from '../../src/lyx/tabular';
@@ -219,5 +219,16 @@ Bo \& Co & 1 & 2 \\
     const { blocks, save } = load('\\begin{tabular}{cc\na & b\n');
     expect(blocks()[0].querySelector('[data-inset="Tabular"]')).toBeNull();
     expect(save()).toBe('\\begin{tabular}{cc\na & b\n');
+  });
+});
+
+describe('graphicsPaths', () => {
+  it('reads the \\graphicspath directories in order', () => {
+    expect(graphicsPaths('\\usepackage{graphicx}\n\\graphicspath{{figures/}{./img/}}\n')).toEqual(['figures/', './img/']);
+    expect(graphicsPaths('\\graphicspath{ {figs/} }')).toEqual(['figs/']);
+  });
+  it('ignores a commented-out \\graphicspath', () => {
+    expect(graphicsPaths('% \\graphicspath{{old/}}\n')).toEqual([]);
+    expect(graphicsPaths('no graphics here')).toEqual([]);
   });
 });

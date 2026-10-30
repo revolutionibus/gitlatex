@@ -21,6 +21,7 @@ import { zotero, type ZoteroSource } from '../storage/server';
 import { dirname, extname, isImagePath, relativePath } from '../utils/paths';
 import { Spinner } from '../components/ui';
 import { createLyxEditor, type LyxEditor, type LyxHost } from './engine';
+import { graphicsPaths } from './tex-import';
 
 type MathLive = typeof import('mathlive');
 let mathlive: Promise<MathLive> | null = null;
@@ -53,6 +54,27 @@ function resolve(dir: string, p: string): string | null {
 }
 
 const IMAGE_TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' };
+/** Tried in turn for an \includegraphics path without an extension (pdfTeX's order first). */
+const GRAPHICS_EXTS = ['pdf', 'png', 'jpg', 'jpeg', 'svg', 'gif', 'webp', 'bmp', 'eps'];
+
+/** Page 1 of a PDF figure as a PNG (pdf.js loads the first time one is shown). */
+async function pdfImage(data: Uint8Array): Promise<string | null> {
+  const { pdfjs } = await import('../pdf/pdfjs');
+  const task = pdfjs.getDocument({ data: data.slice() });
+  const doc = await task.promise;
+  try {
+    const page = await doc.getPage(1);
+    const viewport = page.getViewport({ scale: 2 });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.ceil(viewport.width);
+    canvas.height = Math.ceil(viewport.height);
+    await page.render({ canvas, viewport }).promise;
+    const blob = await new Promise<Blob | null>((r) => canvas.toBlob(r, 'image/png'));
+    return blob && URL.createObjectURL(blob);
+  } finally {
+    void task.destroy();
+  }
+}
 
 /** The span of `b` that differs from `a`: [start, end in a, end in b]. */
 function diffSpan(a: string, b: string): [number, number, number] {
@@ -109,7 +131,8 @@ export function LyxPane({ path }: { path: string }) {
     let timer: ReturnType<typeof setTimeout> | undefined;
     /** The text the editor's document corresponds to. */
     let base = model.getValue();
-    const urls = new Map<string, string>();
+    /** Image URLs by `path@updatedAt`; a PDF figure's is a promise while it renders. */
+    const urls = new Map<string, string | Promise<string | null> | null>();
 
     const write = () => {
       clearTimeout(timer);
@@ -187,17 +210,26 @@ export function LyxPane({ path }: { path: string }) {
       imageUrl: (p) => {
         const ws = workspace();
         if (!ws) return null;
-        for (const dir of [mainDir(), dirname(path)]) {
+        const main = getState().project?.mainFile ?? path;
+        const dirs = [mainDir(), dirname(path)];
+        for (const g of graphicsPaths(ws.getText(main) ?? '')) dirs.push(resolve(mainDir(), g) ?? '');
+        for (const dir of new Set(dirs)) {
           const base = resolve(dir, p);
           if (base == null) continue;
-          for (const cand of extname(base) ? [base] : ['png', 'jpg', 'jpeg', 'svg', 'gif', 'webp'].map((e) => `${base}.${e}`)) {
-            const cached = urls.get(cand);
-            if (cached) return cached;
+          for (const cand of extname(base) && (IMAGE_TYPES[extname(base)] || extname(base) === 'pdf') ? [base] : GRAPHICS_EXTS.map((e) => `${base}.${e}`)) {
             const f = ws.get(cand);
-            const type = IMAGE_TYPES[extname(cand)];
-            if (!f || !type || !f.data) continue;
-            const url = URL.createObjectURL(new Blob([f.data as BlobPart], { type }));
-            urls.set(cand, url);
+            if (!f || f.omitted) continue;
+            const key = `${cand}@${f.updatedAt}`;
+            const cached = urls.get(key);
+            if (cached !== undefined) return cached;
+            const ext = extname(cand);
+            let url: string | Promise<string | null> | null = null;
+            // SVG is kept as text; EPS has no browser renderer (shown as its name)
+            const bytes = f.data ?? (f.text != null ? new TextEncoder().encode(f.text) : null);
+            if (!bytes) continue;
+            if (ext === 'pdf') url = pdfImage(bytes).catch(() => null);
+            else if (IMAGE_TYPES[ext]) url = URL.createObjectURL(new Blob([bytes as BlobPart], { type: IMAGE_TYPES[ext] }));
+            urls.set(key, url);
             return url;
           }
         }
@@ -252,7 +284,7 @@ export function LyxPane({ path }: { path: string }) {
       if (ed) editorBridge.setCursorLine(null);
       ed?.destroy();
       editorRef.current = null;
-      for (const u of urls.values()) URL.revokeObjectURL(u);
+      for (const u of urls.values()) void Promise.resolve(u).then((x) => x && URL.revokeObjectURL(x));
     };
   }, [path, epoch]);
 

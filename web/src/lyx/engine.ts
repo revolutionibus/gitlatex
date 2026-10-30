@@ -36,8 +36,8 @@ export interface LyxHost {
   bibFiles(): string[];
   /** Image files in the project, relative to this file. */
   images(): string[];
-  /** A displayable URL for an \includegraphics path, or null. */
-  imageUrl(path: string): string | null;
+  /** A displayable URL for an \includegraphics path (a promise while it is rendered, e.g. a PDF figure), or null. */
+  imageUrl(path: string): string | null | Promise<string | null>;
   /** The citation command that fits the preamble (cite, citep with natbib, autocite with biblatex). */
   defaultCite(): string;
   /** The Zotero library on this machine (through the gitlatex server). */
@@ -765,23 +765,30 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
   const headBaseOf = b => (b.dataset.type || '').replace(/\*$/, '');
   /** Show an \includegraphics inset as the image (when the project has it). */
   function showGraphics(a) {
-    const key = a.dataset.path + '|' + (a.dataset.opt || '');
-    if (a._shown === key && a.firstChild) return;
-    a._shown = key;
-    a.textContent = '';
     const url = host.imageUrl(a.dataset.path);
+    // the host's URL changes when the file appears or changes
+    const key = a.dataset.path + '|' + (a.dataset.opt || '');
+    if (a._shown === key && a._url === url && a.firstChild) return;
+    a._shown = key; a._url = url;
     const w = /(?:^|,)\s*width\s*=\s*([\d.]+)\s*\\(?:linewidth|textwidth|columnwidth|hsize)/.exec(a.dataset.opt || '');
     a.style.width = w ? Math.min(100, +w[1] * 100) + '%' : '';
     a.title = a.dataset.path + (a.dataset.opt ? ' [' + a.dataset.opt + ']' : '') + ' \u2014 double-click to change';
-    if (url) {
-      const img = document.createElement('img');
-      img.src = url; img.alt = a.dataset.path; img.draggable = false;
-      a.classList.add('has-img');
-      a.append(img);
-    } else {
-      a.classList.remove('has-img');
-      a.textContent = '\u25A3 ' + a.dataset.path;
-    }
+    const show = (u) => {
+      a.textContent = '';
+      if (u) {
+        const img = document.createElement('img');
+        img.src = u; img.alt = a.dataset.path; img.draggable = false;
+        a.classList.add('has-img');
+        a.append(img);
+      } else {
+        a.classList.remove('has-img');
+        a.textContent = '\u25A3 ' + a.dataset.path;
+      }
+    };
+    if (url && typeof url.then === 'function') {
+      show(null);
+      url.then(u => { if (a._url === url) show(u); });
+    } else show(url);
   }
 
   function plainText(el) { return el.textContent.replace(/\u200B/g, '').trim(); }
