@@ -32,9 +32,9 @@ dependencies = [
 dev = ["build", "twine"]
 
 [project.urls]
-Homepage = "https://github.com/abdussamiakanda/gitlatex"
-Documentation = "https://github.com/abdussamiakanda/gitlatex#readme"
-Repository = "https://github.com/abdussamiakanda/gitlatex"
+Homepage = "https://github.com/revolutionibus/gitlatex"
+Documentation = "https://github.com/revolutionibus/gitlatex#readme"
+Repository = "https://github.com/revolutionibus/gitlatex"
 
 [project.scripts]
 gitlatex = "gitlatex.server:main"

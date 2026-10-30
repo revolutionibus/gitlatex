@@ -7,9 +7,7 @@
 Write in a Monaco editor, compile to PDF, and push to GitHub — without Overleaf,
 without a subscription, and without leaving your own machine.
 
-[![PyPI version](https://img.shields.io/pypi/v/gitlatex?color=blue)](https://pypi.org/project/gitlatex/)
-[![PyPI Downloads](https://static.pepy.tech/personalized-badge/gitlatex?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/gitlatex)
-[![Python](https://img.shields.io/pypi/pyversions/gitlatex)](https://pypi.org/project/gitlatex/)
+[![Python](https://img.shields.io/badge/python-3.8%2B-blue.svg)](#building-from-source)
 [![License: ISC](https://img.shields.io/badge/license-ISC-green.svg)](#license)
 
 </div>
@@ -28,7 +26,7 @@ Git repository. Your `.tex` files are just files, and your history is just Git.
 - **Compiles locally**, so your unpublished work never leaves your machine —
   with your own TeX installation, or with **TeX Live running in the browser**
   when you have none.
-- **One command to start.** `pip install gitlatex && gitlatex`.
+- **One command to start.** Once installed, just run `gitlatex`.
 
 > The in-browser TeX engine (~190 MB) and any extra LaTeX packages it needs
 > are downloaded on first use and cached in `~/.gitlatex`, so compiling without
@@ -39,8 +37,15 @@ Git repository. Your `.tex` files are just files, and your history is just Git.
 
 ## Installation
 
+This version is not published on PyPI — `pip install gitlatex` installs the
+original upstream project, not this one. Install it from this repository
+instead, as described in [Building from source](#building-from-source):
+
 ```bash
-pip install gitlatex
+git clone https://github.com/revolutionibus/gitlatex.git
+cd gitlatex
+(cd web && npm ci && npm run build)   # build the editor UI
+pip install .
 ```
 
 **Requirements**
@@ -48,6 +53,7 @@ pip install gitlatex
 | | |
 | --- | --- |
 | Python | 3.8 or newer |
+| Node.js | 22.12 or newer, with `npm` (to build the editor UI) |
 | LaTeX | Optional — [TeX Live](https://www.tug.org/texlive/), [MiKTeX](https://miktex.org/) or [MacTeX](https://www.tug.org/mactex/). Without one, documents compile in the browser |
 | Git | Required for cloning, pushing and version history |
 
@@ -114,7 +120,7 @@ package.
 ### 1. Get the code
 
 ```bash
-git clone https://github.com/abdussamiakanda/gitlatex.git
+git clone https://github.com/revolutionibus/gitlatex.git
 cd gitlatex
 ```
 
@@ -145,7 +151,8 @@ The browser opens at **http://localhost:5000** (see [Quick start](#quick-start)
 for the options). Because the install is editable, Python changes take effect
 when you restart `gitlatex`, and UI changes after another `npm run build`. Use
 a virtual environment (`python -m venv .venv && source .venv/bin/activate`) to
-keep it separate from a `pip install gitlatex` from PyPI.
+keep it separate from the upstream `gitlatex` package on PyPI, which has the
+same name and command.
 
 ### Developing the UI with hot reload
 
@@ -179,8 +186,7 @@ The browser end-to-end suites are described under [Contributing](#contributing).
 
 ### Making a package
 
-To build the same wheel that is published to PyPI (with the UI built first,
-step 2):
+To build a wheel you can install or share (with the UI built first, step 2):
 
 ```bash
 pip install build
