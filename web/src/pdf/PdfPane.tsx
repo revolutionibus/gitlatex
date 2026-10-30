@@ -10,6 +10,7 @@ import { useStore, setState, updateSettings } from '../state/store';
 import { applyQuickFix, compile, downloadPdf, inverseSearch, openPdfInNewTab, revealDiagnostic, useCompiler } from '../state/actions';
 import { explain } from '../latex/explain';
 import type { PdfViewerHandle, Zoom } from './PdfViewer';
+import { bookmarksKey } from './bookmarks';
 import { Button, IconButton, ProgressBar, Spinner, clsx } from '../components/ui';
 import { formatBytes } from '../utils/misc';
 import type { Diagnostic } from '../types';
@@ -25,6 +26,7 @@ export function PdfPane() {
   const engine = useStore((s) => s.engine);
   const settings = useStore((s) => s.settings);
   const target = useStore((s) => s.pdfTarget);
+  const bookmarkKey = useStore((s) => (s.project ? bookmarksKey(s.project.id, s.project.mainFile) : null));
   const [zoom, setZoom] = useState<Zoom>(() => {
     const z = localStorage.getItem('gitlatex.pdfZoom');
     return z === 'page' ? 'page' : z && !isNaN(Number(z)) ? Number(z) : 'width';
@@ -102,6 +104,7 @@ export function PdfPane() {
                 onPageChange={onPageChange}
                 onInverseSearch={inverseSearch}
                 target={target}
+                bookmarkKey={bookmarkKey}
                 dark={settings.pdfDarkMode}
               />
             </Suspense>

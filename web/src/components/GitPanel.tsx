@@ -6,11 +6,11 @@
  */
 import { useEffect, useState } from 'react';
 import {
-  ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, ChevronRight, CloudUpload, FileText, FolderGit2, GitBranch, GitMerge, Minus, MoreHorizontal, Plus, RefreshCw, RotateCcw, Undo2,
+  ArrowDownToLine, ArrowUpFromLine, Check, ChevronDown, ChevronRight, CloudUpload, Eraser, FileText, FolderGit2, GitBranch, GitMerge, Minus, MoreHorizontal, Plus, RefreshCw, RotateCcw, Undo2,
 } from 'lucide-react';
 import { useStore, openDialog, toast } from '../state/store';
 import {
-  gitInit, openFile, openPublishDialog, promptCreateBranch, refreshScm, restoreFileContent, scmAbort, scmCheckout, scmCommit, scmDiscard, scmFetch, scmMarkResolved, scmPull, scmPush, scmResolve, scmStage, scmSync,
+  cleanAuxFiles, gitInit, openFile, openPublishDialog, promptCreateBranch, refreshScm, restoreFileContent, scmAbort, scmCheckout, scmCommit, scmDiscard, scmFetch, scmMarkResolved, scmPull, scmPush, scmResolve, scmStage, scmSync,
   scmUnstage, workspace,
 } from '../state/actions';
 import * as server from '../storage/server';
@@ -354,18 +354,30 @@ export function GitPanel() {
           }}
           className="focus-ring w-full resize-y rounded-md border border-line bg-panel-2 px-2 py-1.5 text-[13px] text-fg placeholder:text-faint"
         />
-        <Button
-          size="sm"
-          variant="primary"
-          className="mt-1.5 w-full"
-          icon={primary.icon}
-          disabled={!!primary.disabled || !!busy}
-          loading={!!busy && busy !== 'checkout'}
-          onClick={primary.onClick}
-          title={primary.title}
-        >
-          {primary.label}
-        </Button>
+        <div className="mt-1.5 flex gap-1.5">
+          <Button
+            size="sm"
+            variant="primary"
+            className="min-w-0 flex-1"
+            icon={primary.icon}
+            disabled={!!primary.disabled || !!busy}
+            loading={!!busy && busy !== 'checkout' && busy !== 'clean'}
+            onClick={primary.onClick}
+            title={primary.title}
+          >
+            {primary.label}
+          </Button>
+          <Button
+            size="sm"
+            icon={<Eraser className="size-3.5" />}
+            disabled={!!busy}
+            loading={busy === 'clean'}
+            onClick={() => void run('clean', cleanAuxFiles)}
+            title="Delete build files (.aux, .log, …) so they are not committed"
+          >
+            Clean
+          </Button>
+        </div>
 
         <FileSection
           title="Merge changes"

@@ -19,6 +19,21 @@ Modelled on VS Code's:
 - **Create and switch branches**, or **publish** a local repository to a new
   remote.
 
+## Build files
+
+LaTeX leaves files like `.aux`, `.log`, `.toc`, `.bbl` and `.synctex.gz` next
+to your document. GitLaTeX keeps them out of your way:
+
+- **They're hidden** from the file list. The PDF still shows.
+- **New projects get a `.gitignore`** that keeps them out of Git, unless the
+  project already has one.
+- **Clean**, beside the Commit button, deletes them, like `latexmk -c`. Only a
+  file named after a `.tex` file next to it is removed (`main.aux` beside
+  `main.tex`), so an unrelated `notes.log` stays. The PDF is kept.
+
+If your repository already tracks build files, Clean deletes them like any
+other file, and the deletions show up as changes to commit.
+
 ## Merge conflicts
 
 When a pull conflicts, the conflicting files are listed under **Merge Changes**.

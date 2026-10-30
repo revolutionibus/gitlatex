@@ -20,10 +20,12 @@ export interface ProviderContext {
   openFile(path: string, line?: number, column?: number): void;
   applyQuickFix(fix: QuickFix): void;
   ensurePackage(pkg: string): boolean;
+  /** Open the citation picker on its Zotero tab, searching for `query`. */
+  searchZotero(query: string): void;
 }
 
 const pathOf = (model: monaco.editor.ITextModel) => model.uri.path.slice(1);
-const CIT = /\\(?:[a-zA-Z]*cite[a-zA-Z]*|nocite)\*?(?:\[[^\]]*\]){0,2}\{([^}]*)$/;
+export const CIT =/\\(?:[a-zA-Z]*cite[a-zA-Z]*|nocite)\*?(?:\[[^\]]*\]){0,2}\{([^}]*)$/;
 const REF = /\\(?:ref|eqref|pageref|autoref|nameref|[cC]ref|vref|labelcref)\*?\{([^}]*)$/;
 const GFX = /\\includegraphics\*?(?:\[[^\]]*\])?\{([^}]*)$/;
 const INPUT = /\\(input|include|subfile|lstinputlisting(?:\[[^\]]*\])?)\{([^}]*)$/;
@@ -119,6 +121,7 @@ export function registerProviders(ctx: ProviderContext) {
   });
   void addPackageCommand;
   monaco.editor.registerCommand('gitlatex.quickFix', (_accessor, fix: QuickFix) => ctx.applyQuickFix(fix));
+  monaco.editor.registerCommand('gitlatex.searchZotero', (_accessor, query: string) => ctx.searchZotero(query));
 
   monaco.languages.registerCompletionItemProvider('latex', {
     triggerCharacters: ['\\', '{', ','],
@@ -133,15 +136,28 @@ export function registerProviders(ctx: ProviderContext) {
       if ((m = CIT.exec(before))) {
         const typed = typedArg(m[1]);
         return {
-          suggestions: bibEntries(ws).map((e) => ({
-            label: { label: e.key, description: e.fields.year ?? '' },
-            kind: K.Reference,
-            insertText: e.key,
-            detail: formatEntry(e),
-            documentation: { value: `**${e.fields.title ?? e.key}**\n\n${e.fields.author ?? ''}\n\n*${e.file}*` },
-            filterText: `${e.key} ${e.fields.title ?? ''} ${e.fields.author ?? ''}`,
-            range: wordRangeAfter(position, typed.length),
-          })),
+          // Last in the list: removes what was typed and searches Zotero for it instead.
+          suggestions: [
+            ...bibEntries(ws).map((e) => ({
+              label: { label: e.key, description: e.fields.year ?? '' },
+              kind: K.Reference,
+              insertText: e.key,
+              detail: formatEntry(e),
+              documentation: { value: `**${e.fields.title ?? e.key}**\n\n${e.fields.author ?? ''}\n\n*${e.file}*` },
+              filterText: `${e.key} ${e.fields.title ?? ''} ${e.fields.author ?? ''}`,
+              range: wordRangeAfter(position, typed.length),
+            })),
+            {
+              label: { label: typed ? `Search Zotero for “${typed}”…` : 'Search Zotero…', description: 'Zotero' },
+              kind: K.Event,
+              insertText: '',
+              filterText: typed,
+              sortText: '￿',
+              detail: 'Import from your Zotero library',
+              command: { id: 'gitlatex.searchZotero', title: 'Search Zotero', arguments: [typed] },
+              range: wordRangeAfter(position, typed.length),
+            },
+          ],
         };
       }
       if ((m = REF.exec(before))) {

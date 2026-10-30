@@ -42,7 +42,7 @@ function DialogSwitch({ dialog }: { dialog: Dialog }) {
     case 'shortcuts':
       return <ShortcutsDialog />;
     case 'wizard':
-      return <WizardDialog wizard={dialog.wizard} />;
+      return <WizardDialog wizard={dialog.wizard} source={dialog.source} query={dialog.query} />;
     case 'diff':
       return <DiffDialog d={dialog} />;
     case 'publish':
@@ -340,6 +340,7 @@ function ShortcutsDialog() {
   const rows: [string, string][] = [
     [`${modKey}+Enter  /  ${modKey}+S`, 'Compile'],
     [`${modKey}+Shift+P`, 'Command palette'],
+    [`${modKey}+Shift+C`, 'Insert citation (this project or Zotero)'],
     ['/', 'Slash commands (on an empty line or after a space)'],
     [`${modKey}+Space`, 'Autocomplete (commands, \\cite keys, \\ref labels, files)'],
     [`${modKey}+B / ${modKey}+I / ${modKey}+U`, 'Bold / italic / underline'],

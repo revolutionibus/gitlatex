@@ -153,6 +153,7 @@ export function EditorPane() {
       openFile,
       applyQuickFix,
       ensurePackage,
+      searchZotero: (query) => openDialog({ type: 'wizard', wizard: 'cite', source: 'zotero', query }),
     });
 
     const spell = installSpellCheck(editor, s.spellCheck);
@@ -192,6 +193,14 @@ export function EditorPane() {
       contextMenuGroupId: 'navigation',
       contextMenuOrder: 0.5,
       run: () => forwardSearch(),
+    });
+    editor.addAction({
+      id: 'gitlatex.insertCitation',
+      label: 'Insert citation…',
+      keybindings: [M.CtrlCmd | M.Shift | K.KeyC],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0.6,
+      run: () => openDialog({ type: 'wizard', wizard: 'cite' }),
     });
     const syncClickSub = editor.onMouseDown((e) => {
       const ev = e.event;

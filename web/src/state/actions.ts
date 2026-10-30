@@ -1131,6 +1131,24 @@ export function scmDiscard(files: server.ScmFile[]) {
   });
 }
 
+/** Delete the build files (.aux, .log, .synctex.gz…) next to each .tex, like VimTeX's :VimtexClean. */
+export async function cleanAuxFiles() {
+  try {
+    await ws?.flush();
+    const { removed } = await server.cleanProject();
+    toast(
+      removed.length
+        ? { kind: 'success', title: `Removed ${plural(removed.length, 'build file')}`, message: removed.slice(0, 6).join(', ') + (removed.length > 6 ? ', …' : '') }
+        : { kind: 'info', title: 'Already clean', message: 'No build files to remove.' },
+    );
+  } catch (err) {
+    toast({ kind: 'error', title: 'Could not clean build files', message: err instanceof Error ? err.message : String(err) });
+  } finally {
+    void refreshScm();
+    bumpGit();
+  }
+}
+
 /** Commit what is staged, or everything when nothing is (VS Code's smart commit). */
 export async function scmCommit(message: string) {
   const op = getState().scm?.inProgress;

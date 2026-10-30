@@ -21,11 +21,12 @@ export type BottomView = 'problems' | 'log' | 'console';
 
 export type Dialog =
   | { type: 'new-project'; initialTemplate?: string }
-  | { type: 'settings'; section?: 'about' }
+  | { type: 'settings'; section?: 'about' | 'zotero' }
   | { type: 'publish' }
   | { type: 'command-palette' }
   | { type: 'shortcuts' }
-  | { type: 'wizard'; wizard: Wizard }
+  /** `source`/`query`: open the citation picker on its Zotero tab, already searching. */
+  | { type: 'wizard'; wizard: Wizard; source?: 'project' | 'zotero'; query?: string }
   | { type: 'prompt'; title: string; label: string; value: string; placeholder?: string; confirm: string; onSubmit: (v: string) => void | Promise<void>; onCancel?: () => void }
   | { type: 'confirm'; title: string; message: string; confirm: string; danger?: boolean; onConfirm: () => void | Promise<void>; onCancel?: () => void }
   | { type: 'diff'; title: string; path: string; original: string; modified: string; onRestore?: () => void };
@@ -141,6 +142,27 @@ export function setCompilerApi(patch: { url?: string; key?: string }) {
       if (v.trim()) localStorage.setItem(k, v.trim());
       else localStorage.removeItem(k);
     }
+  } catch {
+    /* storage disabled */
+  }
+}
+
+// A zotero.org API key, so the citation picker can search the cloud library
+// when the Zotero app is not running.
+const ZOTERO_KEY = 'gitlatex-zotero-api-key';
+
+export function getZoteroKey(): string {
+  try {
+    return localStorage.getItem(ZOTERO_KEY)?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setZoteroKey(key: string) {
+  try {
+    if (key.trim()) localStorage.setItem(ZOTERO_KEY, key.trim());
+    else localStorage.removeItem(ZOTERO_KEY);
   } catch {
     /* storage disabled */
   }

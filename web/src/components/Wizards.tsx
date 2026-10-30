@@ -1,22 +1,23 @@
 /**
  * Interactive helpers opened from the slash menu: table grid, matrix builder,
- * image picker, citation picker (with DOI import), reference picker, symbols.
+ * image picker, citation picker (with DOI and Zotero import), reference picker, symbols.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Table2, Braces, ImagePlus, BookMarked, Hash, Upload, Search, Sigma, Plus } from 'lucide-react';
-import { closeDialog, toast, useStore } from '../state/store';
+import { closeDialog, getZoteroKey, openDialog, toast, useStore } from '../state/store';
 import { addFiles, ensurePackage, includePathFor, workspace } from '../state/actions';
 import { editorBridge } from '../editor/bridge';
-import { mathAt } from '../editor/providers';
+import { CIT, mathAt } from '../editor/providers';
 import { MathPreview } from '../editor/SlashMenu';
 import { tableSnippet, matrixSnippet, matrixPreview, SYMBOL_GROUPS, type MatrixKind, type MatrixFill, type Wizard } from '../editor/slash-commands';
-import { parseBib, formatEntry, bibtexFromDoi } from '../latex/bib';
+import { parseBib, formatEntry, bibtexFromDoi, mergeBib } from '../latex/bib';
 import { labels, loadedPackages } from '../latex/analysis';
 import { pickFiles, readFileList } from '../storage/local-disk';
+import { zotero, type ZoteroItem, type ZoteroSource, type ZoteroStatus } from '../storage/server';
 import { basename, isImagePath, stripExt, extname } from '../utils/paths';
-import { Button, Modal, TextInput, Toggle, clsx } from './ui';
+import { Button, Modal, Spinner, TextInput, Toggle, clsx } from './ui';
 
-export function WizardDialog({ wizard }: { wizard: Wizard }) {
+export function WizardDialog({ wizard, source, query }: { wizard: Wizard; source?: CiteSource; query?: string }) {
   switch (wizard) {
     case 'table':
       return <TableWizard />;
@@ -25,7 +26,7 @@ export function WizardDialog({ wizard }: { wizard: Wizard }) {
     case 'image':
       return <ImageWizard />;
     case 'cite':
-      return <CiteWizard />;
+      return <CiteWizard initialSource={source} initialQuery={query} />;
     case 'ref':
       return <RefWizard />;
     case 'symbols':
@@ -247,7 +248,28 @@ function Thumb({ path, selected, onClick, onDoubleClick }: { path: string; selec
 
 // ---------------------------------------------------------------------------
 
-function CiteWizard() {
+type CiteSource = 'project' | 'zotero';
+const CITE_SOURCE_KEY = 'gitlatex.citeSource';
+
+function lastCiteSource(): CiteSource {
+  try {
+    return localStorage.getItem(CITE_SOURCE_KEY) === 'zotero' ? 'zotero' : 'project';
+  } catch {
+    return 'project';
+  }
+}
+
+/** The keys typed so far when the cursor is already inside \cite{…}, else null. */
+function openCiteArgument(): string | null {
+  const e = editorBridge.get();
+  const pos = e?.getPosition();
+  const model = e?.getModel();
+  if (!pos || !model) return null;
+  const m = CIT.exec(model.getLineContent(pos.lineNumber).slice(0, pos.column - 1));
+  return m ? m[1] : null;
+}
+
+function CiteWizard({ initialSource, initialQuery }: { initialSource?: CiteSource; initialQuery?: string }) {
   const treeVersion = useStore((s) => s.treeVersion);
   const contentVersion = useStore((s) => s.contentVersion);
   const entries = useMemo(() => (workspace()?.textFiles('.bib') ?? []).flatMap((f) => parseBib(f.text, f.path)), [treeVersion, contentVersion]);
@@ -259,28 +281,74 @@ function CiteWizard() {
   const pkgs = loadedPackages(main);
   const commands = pkgs.has('biblatex') ? ['autocite', 'parencite', 'textcite', 'cite'] : pkgs.has('natbib') ? ['citep', 'citet', 'cite'] : ['cite'];
   const [cmd, setCmd] = useState(commands[0]);
+  // Opened from inside \cite{…} (the shortcut, or "Search Zotero…" in autocomplete): add keys to it.
+  const [inside] = useState(openCiteArgument);
+  const citeSnippet = (keys: string[]) =>
+    inside === null ? `\\${cmd}{${keys.join(',')}}$0` : (/[{,]\s*$|^\s*$/.test(inside) ? '' : ',') + keys.join(',');
   const shown = entries.filter((e) => `${e.key} ${e.fields.title ?? ''} ${e.fields.author ?? ''} ${e.fields.year ?? ''}`.toLowerCase().includes(q.toLowerCase()));
+
+  /** Merge BibTeX records into the project's .bib file and select their keys. */
+  const addToBib = (records: string) => {
+    const ws = workspace()!;
+    const target = ws.paths().find((p) => p.endsWith('.bib')) ?? 'references.bib';
+    const merged = mergeBib(ws.getText(target) ?? '', records);
+    if (merged.added.length) ws.writeFile(target, merged.text);
+    setSel((s) => [...new Set([...s, ...merged.keys])]);
+    if (!/\\(bibliography|addbibresource)\b/.test(main)) {
+      toast({ kind: 'warning', title: 'No bibliography yet', message: `Added to ${target}. Insert /bibliography at the end of your document to print it.` });
+    } else if (merged.added.length) {
+      toast({ kind: 'success', title: merged.added.length === 1 ? 'Reference imported' : `${merged.added.length} references imported`, message: `${merged.added.join(', ')} → ${target}` });
+    } else {
+      toast({ kind: 'info', title: 'Already in the bibliography', message: `${merged.keys.join(', ')} → ${target}` });
+    }
+    return merged.keys;
+  };
 
   const importDoi = async () => {
     setBusy(true);
     try {
-      const record = await bibtexFromDoi(doi);
-      const ws = workspace()!;
-      const bibs = ws.paths().filter((p) => p.endsWith('.bib'));
-      const target = bibs[0] ?? 'references.bib';
-      ws.writeFile(target, (ws.getText(target) ?? '') + (ws.getText(target) ? '\n' : '') + record);
-      const key = /@\w+\s*\{\s*([^,\s]+)/.exec(record)?.[1];
-      if (key) setSel((s) => [...s, key]);
+      addToBib(await bibtexFromDoi(doi));
       setDoi('');
-      if (!/\\(bibliography|addbibresource)\b/.test(main)) {
-        toast({ kind: 'warning', title: 'No bibliography yet', message: `Added to ${target}. Insert /bibliography at the end of your document to print it.` });
-      } else toast({ kind: 'success', title: 'Reference imported', message: `${key} → ${target}` });
     } catch (err) {
       toast({ kind: 'error', title: 'DOI import failed', message: err instanceof Error ? err.message : String(err) });
     } finally {
       setBusy(false);
     }
   };
+
+  const [source, setSourceState] = useState<CiteSource>(() => initialSource ?? lastCiteSource());
+  const setSource = (v: CiteSource) => {
+    setSourceState(v);
+    try {
+      localStorage.setItem(CITE_SOURCE_KEY, v);
+    } catch {
+      // private window or blocked storage: just don't remember the tab
+    }
+  };
+  const [zsel, setZsel] = useState<ZoteroItem[]>([]);
+  const [zsource, setZsource] = useState<ZoteroSource>('localApi');
+  const citeFromZotero = async () => {
+    setBusy(true);
+    try {
+      const { bibtex } = await zotero.export(zsel.map((i) => i.id), zsource, pkgs.has('biblatex'), getZoteroKey());
+      const keys = addToBib(bibtex);
+      insertAndClose(citeSnippet([...new Set([...sel, ...keys])]));
+    } catch (err) {
+      toast({ kind: 'error', title: 'Zotero import failed', message: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setBusy(false);
+    }
+  };
+  const tab = (v: typeof source, label: string) => (
+    <button
+      role="tab"
+      aria-selected={source === v}
+      onClick={() => setSource(v)}
+      className={clsx('h-8 border-b-2 px-3 text-[12px] font-medium', source === v ? 'border-accent text-fg' : 'border-transparent text-muted hover:text-fg')}
+    >
+      {label}
+    </button>
+  );
 
   return (
     <Modal
@@ -290,49 +358,171 @@ function CiteWizard() {
       width="max-w-2xl"
       footer={
         <>
-          <select value={cmd} onChange={(e) => setCmd(e.target.value)} className="focus-ring mr-auto h-8 rounded-md border border-line bg-panel-2 px-2 text-[13px] text-fg">
-            {commands.map((c) => <option key={c} value={c}>\{c}</option>)}
-          </select>
+          {inside === null ? (
+            <select value={cmd} onChange={(e) => setCmd(e.target.value)} className="focus-ring mr-auto h-8 rounded-md border border-line bg-panel-2 px-2 text-[13px] text-fg">
+              {commands.map((c) => <option key={c} value={c}>\{c}</option>)}
+            </select>
+          ) : (
+            <span className="mr-auto text-[12px] text-muted">Adds the keys to the citation at the cursor</span>
+          )}
           <Button variant="ghost" onClick={closeDialog}>Cancel</Button>
-          <Button variant="primary" disabled={!sel.length} onClick={() => insertAndClose(`\\${cmd}{${sel.join(',')}}$0`)}>Cite {sel.length || ''}</Button>
+          {source === 'zotero' ? (
+            <Button variant="primary" loading={busy} disabled={!zsel.length} onClick={() => void citeFromZotero()}>Import &amp; cite {zsel.length || ''}</Button>
+          ) : (
+            <Button variant="primary" disabled={!sel.length} onClick={() => insertAndClose(citeSnippet(sel))}>Cite {sel.length || ''}</Button>
+          )}
         </>
       }
     >
-      <div className="space-y-3">
-        <div className="flex items-center gap-2">
-          <Search className="size-4 text-faint" />
-          <TextInput autoFocus placeholder="Search by key, title, author, year…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <div className="-mt-2 mb-3 flex border-b border-line" role="tablist">
+        {tab('project', 'This project')}
+        {tab('zotero', 'Zotero')}
+      </div>
+      {source === 'zotero' ? (
+        <ZoteroPicker initialQuery={initialQuery} selected={zsel} onChange={setZsel} onSource={setZsource} />
+      ) : (
+        <div className="space-y-3">
+          <div className="flex items-center gap-2">
+            <Search className="size-4 text-faint" />
+            <TextInput autoFocus placeholder="Search by key, title, author, year…" value={q} onChange={(e) => setQ(e.target.value)} />
+          </div>
+          <div className="max-h-72 overflow-y-auto rounded-lg border border-line">
+            {!shown.length ? (
+              <div className="p-4 text-center text-xs text-muted">{entries.length ? 'No matches.' : 'No .bib entries in this project yet — import one by DOI below.'}</div>
+            ) : (
+              shown.map((e) => {
+                const on = sel.includes(e.key);
+                return (
+                  <button
+                    key={`${e.file}:${e.key}`}
+                    onClick={() => setSel((s) => (on ? s.filter((k) => k !== e.key) : [...s, e.key]))}
+                    onDoubleClick={() => insertAndClose(citeSnippet([...new Set([...sel, e.key])]))}
+                    className={clsx('flex w-full items-start gap-2 border-b border-line/60 px-3 py-2 text-left last:border-0', on ? 'bg-accent/10' : 'hover:bg-hover')}
+                  >
+                    <input type="checkbox" readOnly checked={on} className="mt-1 accent-[var(--c-accent)]" />
+                    <span className="min-w-0">
+                      <span className="block text-[13px] font-medium text-fg">{e.fields.title ?? e.key}</span>
+                      <span className="block truncate text-[11px] text-muted">{formatEntry(e)}</span>
+                      <span className="font-mono text-[10.5px] text-faint">{e.key}</span>
+                    </span>
+                  </button>
+                );
+              })
+            )}
+          </div>
+          <div className="flex gap-2">
+            <TextInput placeholder="Import by DOI, e.g. 10.1145/3292500.3330701" value={doi} onChange={(e) => setDoi(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && doi && void importDoi()} />
+            <Button icon={<Plus className="size-3.5" />} loading={busy} disabled={!doi.trim()} onClick={() => void importDoi()}>Import</Button>
+          </div>
         </div>
-        <div className="max-h-72 overflow-y-auto rounded-lg border border-line">
-          {!shown.length ? (
-            <div className="p-4 text-center text-xs text-muted">{entries.length ? 'No matches.' : 'No .bib entries in this project yet — import one by DOI below.'}</div>
-          ) : (
-            shown.map((e) => {
-              const on = sel.includes(e.key);
-              return (
-                <button
-                  key={`${e.file}:${e.key}`}
-                  onClick={() => setSel((s) => (on ? s.filter((k) => k !== e.key) : [...s, e.key]))}
-                  onDoubleClick={() => insertAndClose(`\\${cmd}{${[...new Set([...sel, e.key])].join(',')}}$0`)}
-                  className={clsx('flex w-full items-start gap-2 border-b border-line/60 px-3 py-2 text-left last:border-0', on ? 'bg-accent/10' : 'hover:bg-hover')}
-                >
-                  <input type="checkbox" readOnly checked={on} className="mt-1 accent-[var(--c-accent)]" />
-                  <span className="min-w-0">
-                    <span className="block text-[13px] font-medium text-fg">{e.fields.title ?? e.key}</span>
-                    <span className="block truncate text-[11px] text-muted">{formatEntry(e)}</span>
-                    <span className="font-mono text-[10.5px] text-faint">{e.key}</span>
-                  </span>
-                </button>
-              );
-            })
-          )}
-        </div>
+      )}
+    </Modal>
+  );
+}
+
+/** Search the Zotero library on this machine (through the gitlatex server) and pick items to import. */
+function ZoteroPicker({ initialQuery = '', selected, onChange, onSource }: { initialQuery?: string; selected: ZoteroItem[]; onChange: (items: ZoteroItem[]) => void; onSource: (s: ZoteroSource) => void }) {
+  const [status, setStatus] = useState<ZoteroStatus | null>(null);
+  const [q, setQ] = useState(initialQuery);
+  const [items, setItems] = useState<ZoteroItem[] | null>(null);
+  const [mode, setMode] = useState<ZoteroSource | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
+  // From the first keystroke until the answer arrives (debounce included), so typing feels acknowledged.
+  const [searching, setSearching] = useState(false);
+
+  useEffect(() => {
+    setStatus(null);
+    zotero.status(getZoteroKey()).then(setStatus, (err) => setStatus({ running: false, betterBibtex: false, localApi: false, web: false, username: null, message: err instanceof Error ? err.message : String(err) }));
+  }, [retry]);
+
+  const ready = !!status && (status.betterBibtex || status.localApi || status.web);
+  useEffect(() => {
+    if (!ready) return;
+    let stale = false;
+    setSearching(true);
+    const t = setTimeout(() => {
+      zotero
+        .search(q, getZoteroKey())
+        .then(
+          (r) => {
+            if (stale) return;
+            setItems(r.items);
+            setMode(r.source);
+            setError(null);
+            onSource(r.source);
+          },
+          (err) => !stale && setError(err instanceof Error ? err.message : String(err)),
+        )
+        .finally(() => !stale && setSearching(false));
+    }, 250);
+    return () => {
+      stale = true;
+      clearTimeout(t);
+    };
+  }, [q, ready]);
+
+  if (!status) return <div className="flex justify-center p-6"><Spinner /></div>;
+  if (!ready) {
+    return (
+      <div className="space-y-3 rounded-lg border border-line p-4 text-[13px] text-muted">
+        <p>{status.message ?? 'Zotero is not available.'}</p>
+        {!getZoteroKey() && <p className="text-[12px]">Or add a zotero.org API key to search your synced library without the app.</p>}
         <div className="flex gap-2">
-          <TextInput placeholder="Import by DOI, e.g. 10.1145/3292500.3330701" value={doi} onChange={(e) => setDoi(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && doi && void importDoi()} />
-          <Button icon={<Plus className="size-3.5" />} loading={busy} disabled={!doi.trim()} onClick={() => void importDoi()}>Import</Button>
+          <Button onClick={() => setRetry((n) => n + 1)}>Try again</Button>
+          <Button variant="ghost" onClick={() => openDialog({ type: 'settings', section: 'zotero' })}>Zotero settings</Button>
         </div>
       </div>
-    </Modal>
+    );
+  }
+
+  // Name the library on each item only when results come from more than one.
+  const manyLibraries = new Set(items?.map((it) => it.library)).size > 1;
+  const toggle = (it: ZoteroItem) => onChange(selected.some((s) => s.id === it.id) ? selected.filter((s) => s.id !== it.id) : [...selected, it]);
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        {searching ? <Spinner className="size-4 shrink-0 text-accent" /> : <Search className="size-4 shrink-0 text-faint" />}
+        <TextInput autoFocus placeholder="Search your Zotero libraries by title, author, year…" value={q} onChange={(e) => setQ(e.target.value)} aria-busy={searching} />
+      </div>
+      <div className={clsx('max-h-72 overflow-y-auto rounded-lg border border-line transition-opacity', searching && items?.length && 'opacity-60')} aria-busy={searching}>
+        {error ? (
+          <div className="p-4 text-center text-xs text-danger">{error}</div>
+        ) : items === null ? (
+          searching ? null : <div className="flex justify-center p-4"><Spinner /></div>
+        ) : !items.length ? (
+          searching ? null : <div className="p-4 text-center text-xs text-muted">{q.trim() ? 'No matches.' : 'Type to search your Zotero libraries.'}</div>
+        ) : (
+          items.map((it) => {
+            const on = selected.some((s) => s.id === it.id);
+            return (
+              <button
+                key={it.id}
+                onClick={() => toggle(it)}
+                className={clsx('flex w-full items-start gap-2 border-b border-line/60 px-3 py-2 text-left last:border-0', on ? 'bg-accent/10' : 'hover:bg-hover')}
+              >
+                <input type="checkbox" readOnly checked={on} className="mt-1 accent-[var(--c-accent)]" />
+                <span className="min-w-0">
+                  <span className="block text-[13px] font-medium text-fg">{it.title || '(untitled)'}</span>
+                  <span className="block truncate text-[11px] text-muted">{[it.creators.join(', '), it.year && `(${it.year})`, it.where].filter(Boolean).join(' ')}</span>
+                  <span className="flex flex-wrap items-center gap-x-2">
+                    {it.key && <span className="font-mono text-[10.5px] text-faint">{it.key}</span>}
+                    {manyLibraries && it.library && <span className="rounded bg-hover px-1.5 text-[10.5px] text-muted">{it.library}</span>}
+                  </span>
+                </span>
+              </button>
+            );
+          })
+        )}
+      </div>
+      <p className="text-[11px] text-faint">
+        {mode === 'betterBibtex'
+          ? 'Using Better BibTeX citation keys.'
+          : mode === 'web'
+            ? `Searching your zotero.org libraries${status.username ? ` (${status.username})` : ''}, personal and group, as last synced.`
+            : 'Searching your personal and group libraries through Zotero’s local API. Install Better BibTeX for stable citation keys.'} Selected items are added to the project’s .bib file.
+      </p>
+    </div>
   );
 }
 

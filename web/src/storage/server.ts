@@ -83,6 +83,8 @@ export const createProject = (name: string, files: { path: string; text?: string
   });
 export const deleteProject = (name: string) => post('/delete-repo', { name });
 export const renameProject = (from: string, to: string) => post<{ name: string }>('/api/project/rename', { from, to });
+/** Delete LaTeX build files (.aux, .log, …) next to each .tex, like latexmk -c. */
+export const cleanProject = () => post<{ removed: string[] }>('/api/project/clean');
 export const cloneProject = (repoUrl: string) => post('/clone', { repoUrl });
 
 // ---- files -------------------------------------------------------------------------
@@ -226,4 +228,51 @@ export const scm = {
   publishOptions: () => get<{ gh: boolean }>('/api/scm/publish-options'),
   publish: (opts: { url?: string; name?: string; private?: boolean }) => post<ScmResult>('/api/scm/publish', opts),
   diff: (path: string, staged: boolean) => get<FileDiff>(`/api/scm/diff${qs({ path, staged: staged ? '1' : '0' })}`),
+};
+
+// ---- Zotero (gitlatex/routes/zotero.py) ------------------------------------------------
+
+/** The desktop app (Better BibTeX or its local API), or zotero.org with an API key. */
+export type ZoteroSource = 'betterBibtex' | 'localApi' | 'web';
+
+export interface ZoteroStatus {
+  /** The desktop app answers on this machine. */
+  running: boolean;
+  betterBibtex: boolean;
+  localApi: boolean;
+  /** zotero.org accepted the API key. */
+  web: boolean;
+  /** The zotero.org account the key belongs to. */
+  username: string | null;
+  /** Why Zotero cannot be used, when it cannot. */
+  message: string | null;
+}
+
+export interface ZoteroItem {
+  /** What export() takes: a citation key with Better BibTeX, else `<library>:<item key>` (user:ABCD1234, group/7:ABCD1234). */
+  id: string;
+  /** "My Library" or the group library's name; absent with Better BibTeX. */
+  library?: string;
+  /** The citation key, when known before export. */
+  key: string | null;
+  title: string;
+  creators: string[];
+  year: string;
+  type: string;
+  where: string;
+}
+
+/** The zotero.org API key travels in a header, never in the URL. */
+const zoteroHeaders = (key: string): Record<string, string> => (key ? { 'X-Zotero-Key': key } : {});
+
+/** `key`: the zotero.org API key ('' for none); the server only uses it when the app cannot answer. */
+export const zotero = {
+  status: (key = '') => request<ZoteroStatus>('/api/zotero/status', { headers: zoteroHeaders(key) }),
+  search: (q: string, key = '') => request<{ source: ZoteroSource; items: ZoteroItem[] }>('/api/zotero/search' + qs({ q }), { headers: zoteroHeaders(key) }),
+  export: (ids: string[], source: ZoteroSource, biblatex: boolean, key = '') =>
+    request<{ bibtex: string }>('/api/zotero/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...zoteroHeaders(key) },
+      body: JSON.stringify({ ids, source, biblatex }),
+    }),
 };

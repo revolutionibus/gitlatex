@@ -9,6 +9,8 @@ powers VS Code.
 - **Autocomplete** for 150+ LaTeX commands and 50+ environments. Inside `\ref{}`
   and `\cite{}` it completes from your project's actual labels and `.bib` keys,
   showing the title, author and year of each entry as you pick.
+- **A citation picker** (`Ctrl`+`Shift`+`C`) for your `.bib` entries, DOIs and
+  your Zotero library — see [citations.md](citations.md).
 - **BibTeX IntelliSense** — entry types after `@`, and field names inside an entry.
 - **Document outline** of every chapter, section and subsection, tracking your
   cursor and jumping you anywhere in the file with a click.

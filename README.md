@@ -83,8 +83,15 @@ automatically as you type.
 - **PDF ↔ source sync** — click a line to find it in the PDF, double-click the
   PDF to jump back, and land on your cursor's page after every build.
   [More](https://github.com/abdussamiakanda/gitlatex/blob/master/docs/compiling.md#pdf--source-sync-synctex)
+- **A PDF viewer for checking your work** — clickable links that show the whole
+  figure, not just its caption, a Back button, and highlighted bookmarks you
+  can step through. [More](https://github.com/abdussamiakanda/gitlatex/blob/master/docs/pdf-viewer.md)
+- **Citations from Zotero** — search your personal and group libraries, from
+  the Zotero app or with a zotero.org API key, and cite in one step; or import
+  by DOI. [More](https://github.com/abdussamiakanda/gitlatex/blob/master/docs/citations.md)
 - **Git built in** — stage, commit, pull, push, branches and merge conflicts in a
-  VS Code-style panel, plus history and side-by-side diffs.
+  VS Code-style panel, plus history and side-by-side diffs. Build files are
+  hidden, ignored in new projects, and one click from gone.
   [More](https://github.com/abdussamiakanda/gitlatex/blob/master/docs/git.md)
 - **Review comments** — Overleaf-style comment threads, shared with coauthors
   through Git. [More](https://github.com/abdussamiakanda/gitlatex/blob/master/docs/review-comments.md)

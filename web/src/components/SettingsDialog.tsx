@@ -3,8 +3,9 @@
  * settings on the right.
  */
 import { useEffect, useState } from 'react';
-import { Settings, Palette, SquarePen, SpellCheck, Braces, Cpu, FileText, SlidersHorizontal, Info, ExternalLink, Sun, Moon, Monitor, Wand2, Globe, Users, KeyRound, Server } from 'lucide-react';
-import { useStore, closeDialog, updateSettings, getCompilerApi, setCompilerApi } from '../state/store';
+import { Settings, Palette, SquarePen, SpellCheck, Braces, Cpu, FileText, SlidersHorizontal, Info, ExternalLink, Sun, Moon, Monitor, Wand2, Globe, Users, KeyRound, Server, BookMarked } from 'lucide-react';
+import { useStore, closeDialog, updateSettings, getCompilerApi, setCompilerApi, getZoteroKey, setZoteroKey } from '../state/store';
+import { zotero, type ZoteroStatus } from '../storage/server';
 import { gitIdentity, reconfigureEngine, serverInfo, setCollabAdmin, setCompiler, setTheme } from '../state/actions';
 import { AdminLogin, ColorPicker, RoomList } from './CollabPanel';
 import { VimSettings, SpellSettings, SnippetManager } from './EditorSettings';
@@ -12,7 +13,7 @@ import { AboutSettings } from './AboutSettings';
 import { COMPILER_API_REPO } from './EnginePanel';
 import { Button, Modal, TextInput, Toggle, clsx } from './ui';
 
-type Page = 'appearance' | 'editor' | 'spelling' | 'snippets' | 'compiler' | 'pdf' | 'collab' | 'advanced' | 'about';
+type Page = 'appearance' | 'editor' | 'spelling' | 'snippets' | 'compiler' | 'pdf' | 'zotero' | 'collab' | 'advanced' | 'about';
 
 const PAGES: { id: Page; label: string; icon: React.ReactNode; description: string }[] = [
   { id: 'appearance', label: 'Appearance', icon: <Palette className="size-4" />, description: 'Theme, text size and what the editor shows.' },
@@ -21,6 +22,7 @@ const PAGES: { id: Page; label: string; icon: React.ReactNode; description: stri
   { id: 'snippets', label: 'Snippets', icon: <Braces className="size-4" />, description: 'Reusable blocks of LaTeX inserted from a short prefix.' },
   { id: 'compiler', label: 'Compiler', icon: <Cpu className="size-4" />, description: 'Where documents are built, and how.' },
   { id: 'pdf', label: 'PDF viewer', icon: <FileText className="size-4" />, description: 'How the compiled PDF is shown.' },
+  { id: 'zotero', label: 'Zotero', icon: <BookMarked className="size-4" />, description: 'Where the citation picker finds your Zotero library.' },
   { id: 'collab', label: 'Collaboration', icon: <Users className="size-4" />, description: 'Your live collaboration relay and how others see you. Used by every project.' },
   { id: 'advanced', label: 'Advanced', icon: <SlidersHorizontal className="size-4" />, description: 'The classic editor and engine download locations.' },
   { id: 'about', label: 'About', icon: <Info className="size-4" />, description: 'Version, updates and support.' },
@@ -55,7 +57,7 @@ const Switch = (props: React.ComponentProps<typeof Toggle>) => <Toggle className
 
 const selectClass = 'focus-ring h-8 rounded-md border border-line bg-panel-2 px-2 text-[13px] text-fg';
 
-export function SettingsDialog({ section }: { section?: 'about' }) {
+export function SettingsDialog({ section }: { section?: 'about' | 'zotero' }) {
   const [page, setPage] = useState<Page>(section ?? 'appearance');
   const current = PAGES.find((p) => p.id === page)!;
   return (
@@ -91,6 +93,7 @@ export function SettingsDialog({ section }: { section?: 'about' }) {
           {page === 'snippets' && <SnippetManager />}
           {page === 'compiler' && <CompilerPage />}
           {page === 'pdf' && <PdfPage />}
+          {page === 'zotero' && <ZoteroPage />}
           {page === 'collab' && <CollabPage />}
           {page === 'advanced' && <AdvancedPage />}
           {page === 'about' && (
@@ -271,6 +274,67 @@ function PdfPage() {
       <Switch label="Dark pages" description="Invert PDF colours in the preview (not in the file)" checked={s.pdfDarkMode} onChange={(v) => updateSettings({ pdfDarkMode: v })} />
       <Switch label="Use the browser's native PDF viewer" description="Loses SyncTeX double-click navigation" checked={s.pdfNative} onChange={(v) => updateSettings({ pdfNative: v })} />
     </Group>
+  );
+}
+
+const ZOTERO_NEW_KEY = 'https://www.zotero.org/settings/keys/new';
+
+function ZoteroPage() {
+  const [key, setKey] = useState(getZoteroKey);
+  const [status, setStatus] = useState<ZoteroStatus | null>(null);
+  const check = (k: string) => {
+    setStatus(null);
+    zotero.status(k).then(setStatus, (err) =>
+      setStatus({ running: false, betterBibtex: false, localApi: false, web: false, username: null, message: err instanceof Error ? err.message : String(err) }),
+    );
+  };
+  useEffect(() => check(getZoteroKey()), []);
+  const save = () => {
+    if (key.trim() === getZoteroKey()) return;
+    setZoteroKey(key);
+    check(key.trim());
+  };
+
+  const app = !status
+    ? 'Checking…'
+    : status.betterBibtex
+      ? 'Connected, with Better BibTeX citation keys.'
+      : status.localApi
+        ? 'Connected through Zotero’s local API. Install Better BibTeX for stable citation keys.'
+        : status.running
+          ? 'Running, but it does not accept requests from other apps. In Zotero, turn on Settings → Advanced → “Allow other applications on this computer to communicate with Zotero”.'
+          : 'Not running.';
+  const web = !key.trim() ? null : !status ? 'Checking…' : status.web ? `Connected as ${status.username || 'your account'}.` : status.message;
+  return (
+    <>
+      <Group title="Zotero app on this computer">
+        <div className={clsx(ROW, 'text-[12.5px]')}>
+          <span className={status?.betterBibtex || status?.localApi ? 'text-ok' : 'text-muted'}>{app}</span>
+          <div className="mt-1 text-xs text-faint">Used first whenever it is open: it is fastest and needs no key.</div>
+        </div>
+      </Group>
+      <Group title="zotero.org (cloud)">
+        <Field
+          label="API key"
+          description={
+            <>
+              Searches your synced library when the Zotero app is closed or not installed.{' '}
+              <a href={ZOTERO_NEW_KEY} target="_blank" rel="noreferrer" className="text-accent hover:underline">
+                Create a key
+              </a>{' '}
+              with “Allow library access”. It is stored in this browser only.
+            </>
+          }
+          stacked
+        >
+          <div className="flex gap-2">
+            <TextInput type="password" autoComplete="off" placeholder="Paste your zotero.org API key" value={key} onChange={(e) => setKey(e.target.value)} onBlur={save} onKeyDown={(e) => e.key === 'Enter' && save()} />
+            <Button onClick={() => (key.trim() === getZoteroKey() ? check(key.trim()) : save())}>Check</Button>
+          </div>
+          {web && <div className={clsx('mt-2 text-[12px]', status?.web ? 'text-ok' : status ? 'text-danger' : 'text-muted')}>{web}</div>}
+        </Field>
+      </Group>
+    </>
   );
 }
 

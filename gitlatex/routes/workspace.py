@@ -8,6 +8,7 @@ can reach outside the open project.
     POST /api/project/open    select a project and return every file in it
     POST /api/project/create  create a project folder from a set of files
     POST /api/project/rename  rename a project folder
+    POST /api/project/clean   delete LaTeX build files (.aux, .log, …)
     POST /api/fs/write        write one file (text or base64)
     POST /api/fs/mkdir        create a folder (existing is fine)
     POST /api/fs/delete       delete a file or folder (missing is fine)
@@ -26,13 +27,17 @@ from gitlatex.http import _json, with_project_lock
 from gitlatex.services import comments
 from gitlatex.services.git_backend import Repo
 from gitlatex.services.paths import resolve_repo_path
+from gitlatex.services.sync import BUILD_SUFFIXES
 
 bp = Blueprint("workspace", __name__)
 
 # Never shipped to the editor: Git internals, review comments (the review API
-# owns those) and SyncTeX data, which the editor reads from the compile result.
+# owns those) and build output, which the editor reads from the compile result.
 HIDDEN_NAMES = (".git", ".gitlatex")
-HIDDEN_SUFFIXES = (".synctex.gz", ".synctex", ".synctex(busy)")
+HIDDEN_SUFFIXES = BUILD_SUFFIXES
+
+# New projects keep build output out of Git.
+GITIGNORE = "# LaTeX build output\n" + "".join("*%s\n" % s for s in BUILD_SUFFIXES)
 
 # Files above this size are listed but not loaded, so one stray video cannot
 # stall opening a project.
@@ -140,6 +145,10 @@ def create_project():
             os.makedirs(os.path.dirname(target), exist_ok=True)
             with open(target, "wb") as f:
                 f.write(body)
+        gitignore = os.path.join(full, ".gitignore")
+        if not os.path.exists(gitignore):
+            with open(gitignore, "w", encoding="utf-8", newline="\n") as f:
+                f.write(GITIGNORE)
         if data.get("git") and Repo is not None:
             Repo.init(full)
         print("Created project:", name)
@@ -166,6 +175,35 @@ def rename_project():
     if was_current:
         state.current_repo_path = dst
     return jsonify(success=True, name=name)
+
+
+@bp.route("/api/project/clean", methods=["POST"])
+@with_project_lock
+def clean_project():
+    """Delete build output, like latexmk -c (VimTeX's :VimtexClean): a file goes
+    only when it is X<build suffix> next to an X.tex, so a stray notes.log stays.
+    The PDF is kept."""
+    root = state.current_repo_path
+    if not root:
+        return _no_project()
+    removed = []
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = [d for d in dirnames if d not in HIDDEN_NAMES]
+        stems = {name[:-4] for name in filenames if name.lower().endswith(".tex")}
+        if not stems:
+            continue
+        for name in filenames:
+            lower = name.lower()
+            suffix = next((s for s in BUILD_SUFFIXES if lower.endswith(s)), None)
+            if not suffix or name[: -len(suffix)] not in stems:
+                continue
+            full = os.path.join(dirpath, name)
+            try:
+                os.unlink(full)
+                removed.append(_rel(full))
+            except OSError:
+                continue
+    return jsonify(success=True, removed=sorted(removed))
 
 
 @bp.route("/api/fs/write", methods=["POST"])

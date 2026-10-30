@@ -91,3 +91,29 @@ export async function bibtexFromDoi(doi: string): Promise<string> {
   // Pretty-print the single-line record returned by the resolver.
   return text.replace(/,\s*(\w+)\s*=/g, ',\n  $1 = ').replace(/\}\s*$/, '\n}') + '\n';
 }
+
+/**
+ * Append the records in `incoming` to `existing` .bib text, skipping any whose
+ * key is already there. Returns every incoming key, so they can all be cited.
+ */
+export function mergeBib(existing: string, incoming: string): { text: string; keys: string[]; added: string[] } {
+  const have = new Set(parseBib(existing).map((e) => e.key));
+  const keys: string[] = [];
+  const added: string[] = [];
+  const records: string[] = [];
+  const re = /@(\w+)\s*[{(]\s*([^,\s]+)\s*,/g;
+  const starts: { index: number; type: string; key: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(incoming))) starts.push({ index: m.index, type: m[1].toLowerCase(), key: m[2] });
+  starts.forEach((s, i) => {
+    if (s.type === 'comment' || s.type === 'string' || s.type === 'preamble') return;
+    keys.push(s.key);
+    if (have.has(s.key)) return;
+    have.add(s.key);
+    added.push(s.key);
+    records.push(incoming.slice(s.index, starts[i + 1]?.index ?? incoming.length).trim());
+  });
+  if (!records.length) return { text: existing, keys, added };
+  const sep = !existing.trim() ? '' : existing.endsWith('\n\n') ? '' : existing.endsWith('\n') ? '\n' : '\n\n';
+  return { text: existing + sep + records.join('\n\n') + '\n', keys, added };
+}
