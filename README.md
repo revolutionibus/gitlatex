@@ -92,6 +92,105 @@ local folder, open it, and start writing. Changes save automatically as you type
 gitlatex --port 3000 --repos ~/Documents/papers
 ```
 
+> **macOS:** the AirPlay Receiver (System Settings → General → AirDrop &
+> Handoff) also listens on port 5000. If the page does not load, run
+> `gitlatex --port 5050` or turn AirPlay Receiver off.
+
+---
+
+## Building from source
+
+Build from a clone to run the latest code, try a change, or make your own
+package.
+
+**You need**
+
+| | |
+| --- | --- |
+| Python | 3.8 or newer, with `pip` |
+| Node.js | 22.12 or newer, with `npm` (only to build the editor UI) |
+| Git | Any recent version |
+
+### 1. Get the code
+
+```bash
+git clone https://github.com/abdussamiakanda/gitlatex.git
+cd gitlatex
+```
+
+### 2. Build the editor UI
+
+The editor (`web/`, React + TypeScript + Vite) is compiled into
+`gitlatex/ui/`, which the server serves. That folder is not in Git, so a fresh
+clone has to build it once, and again after every change in `web/`:
+
+```bash
+cd web
+npm ci            # install the exact dependency versions from package-lock.json
+npm run build     # type-check and build → ../gitlatex/ui
+cd ..
+```
+
+Without this step gitlatex still starts, but falls back to the older
+**classic** editor.
+
+### 3. Install and run
+
+```bash
+pip install -e .   # editable install: the `gitlatex` command runs this clone
+gitlatex
+```
+
+The browser opens at **http://localhost:5000** (see [Quick start](#quick-start)
+for the options). Because the install is editable, Python changes take effect
+when you restart `gitlatex`, and UI changes after another `npm run build`. Use
+a virtual environment (`python -m venv .venv && source .venv/bin/activate`) to
+keep it separate from a `pip install gitlatex` from PyPI.
+
+### Developing the UI with hot reload
+
+Rebuilding after every UI change is slow; run the Vite dev server instead, in
+two terminals:
+
+```bash
+# terminal 1: the gitlatex server (the API, file access, compiling)
+gitlatex --no-browser
+
+# terminal 2: the UI, reloading as you edit files in web/src
+cd web
+npm run dev        # → http://localhost:5173
+```
+
+Open **http://localhost:5173**. It forwards every API call to the server on
+port 5000; if you started the server on another port, set
+`GITLATEX_API=http://127.0.0.1:<port>` before `npm run dev`.
+
+### Running the tests
+
+```bash
+cd web
+npm test                 # UI unit tests (vitest)
+npm run typecheck        # TypeScript only
+cd ..
+python -m unittest discover tests   # server tests
+```
+
+The browser end-to-end suites are described under [Contributing](#contributing).
+
+### Making a package
+
+To build the same wheel that is published to PyPI (with the UI built first,
+step 2):
+
+```bash
+pip install build
+python -m build          # → dist/gitlatex-<version>.tar.gz and .whl
+pip install dist/gitlatex-*.whl
+```
+
+The version comes from the latest Git tag (see [Releasing](#releasing)), so a
+clone without tags builds as `0.1.devN`.
+
 ---
 
 ## Features
@@ -218,6 +317,25 @@ modes, with `:w` to save. In `.tex` files you also get the parts of
 
 See [docs/vim-mode.md](docs/vim-mode.md) for what each key does, with examples.
 
+### LyX-style editor (WYSIWYM)
+
+Choose **Settings → Appearance → Editor style → LyX style**, or click **LyX**
+on the editor's tab bar, to edit `.tex` files the way
+[LyX](https://www.lyx.org) does: headings, lists, theorems, live formulas,
+footnotes, references, citations and figures instead of LaTeX source, with
+LyX's menus, toolbars and keyboard shortcuts.
+
+- It edits the `.tex` file itself. Paragraphs you don't touch are written
+  back exactly as they were, so Git diffs show only your changes.
+- LaTeX the editor can't show stays visible and editable in red **TeX code**
+  boxes, and <kbd>Ctrl</kbd>+<kbd>L</kbd> inserts one; the preamble is in
+  **Document → Settings**.
+- The red **Z** button cites from Zotero. Switching to **Source** and back
+  keeps the cursor on the same word, and a compile scrolls the PDF to it.
+
+See [docs/lyx-editor.md](docs/lyx-editor.md) for how to use it, every
+shortcut, and the menus.
+
 ### Review comments
 
 An Overleaf-style review panel for leaving comments on your text.
@@ -305,24 +423,13 @@ Projects live in `./repos` unless you pass `--repos`.
 
 ## Contributing
 
-Contributions are welcome. Run from a clone:
-
-```bash
-git clone https://github.com/abdussamiakanda/gitlatex.git
-cd gitlatex
-pip install -e .
-gitlatex
-```
-
-The editor UI lives in `web/` (React + TypeScript + Vite) and is built into
-`gitlatex/ui/`, which the server serves at `/`. It needs Node 22+:
+Contributions are welcome. Set up a clone as in
+[Building from source](#building-from-source): build the UI, `pip install -e .`,
+and use `npm run dev` for hot reload. The browser tests need Playwright's
+Chromium once (`npx playwright install chromium`) and a running server:
 
 ```bash
 cd web
-npm install
-npm run build        # → gitlatex/ui (then run `gitlatex` as usual)
-npm run dev          # hot reload on :5173, proxying the API to `gitlatex --no-browser` on :5000
-npm test             # unit tests (vitest)
 npm run e2e:gitlatex -- http://127.0.0.1:5000 /tmp/gl-e2e   # browser tests: run `gitlatex --repos /tmp/gl-e2e` first
 npm run e2e:features -- http://127.0.0.1:5000 /tmp/gl-e2e  # (and e2e:synctex); they create projects, so never ./repos
 ```
