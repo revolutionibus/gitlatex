@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Math document editor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Source+Serif+4:ital,wght@0,400;0,600;1,400&display=swap">
+<script defer src="https://cdn.jsdelivr.net/npm/mathlive"></script>
+<style>
+:root {
+  --bg: #f4f3ef; --paper: #ffffff; --side: #faf9f6; --text: #1f1e1c; --muted: #6b6963; --faint: #a3a19a;
+  --border: rgba(0,0,0,.12); --accent: #2f6fd0; --accent-bg: #e6effb; --accent-soft: rgba(47,111,208,.09);
+  --thm: #f4f7fc; --sans: Inter, system-ui, sans-serif; --serif: "Source Serif 4", Georgia, serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #1a1a19; --paper: #232322; --side: #1f1f1e; --text: #ecebe6; --muted: #a8a69f; --faint: #6e6c66;
+    --border: rgba(255,255,255,.13); --accent: #7aa9ee; --accent-bg: #1f3352; --accent-soft: rgba(122,169,238,.12); --thm: #262b33;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #1a1a19; --paper: #232322; --side: #1f1f1e; --text: #ecebe6; --muted: #a8a69f; --faint: #6e6c66;
+  --border: rgba(255,255,255,.13); --accent: #7aa9ee; --accent-bg: #1f3352; --accent-soft: rgba(122,169,238,.12); --thm: #262b33;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--text); font-family: var(--sans); font-size: 14px; display: flex; flex-direction: column; }
+
+/* Toolbar */
+.toolbar { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  padding: 8px 14px; background: var(--paper); border-bottom: 1px solid var(--border); }
+.toolbar select, .toolbar button { font: inherit; color: var(--text); background: transparent; border: 1px solid var(--border);
+  border-radius: 7px; height: 32px; padding: 0 10px; cursor: pointer; }
+.toolbar button:hover, .toolbar select:hover { background: var(--accent-soft); }
+.toolbar .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+.toolbar .spacer { flex: 1; }
+.toolbar .primary { background: var(--accent); color: #fff; border-color: transparent; }
+.toolbar .primary:hover { background: var(--accent); opacity: .9; }
+.toolbar .icon { width: 32px; padding: 0; font-family: var(--serif); font-size: 15px; }
+.status { color: var(--faint); font-size: 12px; margin-right: 6px; }
+
+/* Layout */
+.layout { flex: 1; display: grid; grid-template-columns: 220px minmax(0, 1fr); min-height: 0; }
+.sidebar { background: var(--side); border-right: 1px solid var(--border); padding: 16px 14px; overflow-y: auto; }
+.sidebar h3 { margin: 0 0 10px; font-size: 12px; font-weight: 500; color: var(--faint); text-transform: none; }
+.outline a { display: block; color: var(--muted); text-decoration: none; padding: 4px 6px; border-radius: 5px; font-size: 13px; cursor: pointer; }
+.outline a:hover { background: var(--accent-soft); color: var(--text); }
+.outline a.sub { padding-left: 18px; }
+.outline a.thm { padding-left: 18px; font-style: italic; font-size: 12px; }
+.help { margin-top: 24px; font-size: 12px; color: var(--muted); line-height: 1.6; }
+.help kbd { font-family: var(--mono); font-size: 11px; border: 1px solid var(--border); border-radius: 4px; padding: 0 4px; background: var(--paper); }
+.main { overflow-y: auto; padding: 32px 24px 80px; }
+.paper { max-width: 820px; margin: 0 auto; background: var(--paper); border: 1px solid var(--border); border-radius: 10px;
+  padding: 48px 56px 64px 120px; font-family: var(--serif); }
+
+/* Title */
+#docTitle { font-size: 30px; font-weight: 600; text-align: center; margin: 0 0 4px; outline: none; }
+#docAuthor { text-align: center; color: var(--muted); margin: 0 0 36px; outline: none; font-size: 16px; }
+#docTitle:empty::before { content: "Untitled document"; color: var(--faint); }
+#docAuthor:empty::before { content: "Author"; color: var(--faint); }
+
+/* Blocks */
+#editor { outline: none; counter-reset: sec thm eq; }
+.blk { position: relative; margin: 0 0 .75em; min-height: 1.7em; font-size: 17px; line-height: 1.75; }
+.blk::after { content: attr(data-type); position: absolute; left: -100px; top: .45em; width: 82px; text-align: right;
+  font: 11px var(--mono); color: var(--faint); pointer-events: none; user-select: none; }
+.blk.current::after { color: var(--accent); }
+.blk[data-type="section"] { counter-increment: sec; counter-reset: sub thm; font-size: 24px; font-weight: 600; margin-top: 1.3em; line-height: 1.4; }
+.blk[data-type="section"]::before { content: counter(sec) "\2002"; }
+.blk[data-type="subsection"] { counter-increment: sub; font-size: 20px; font-weight: 600; margin-top: 1em; line-height: 1.4; }
+.blk[data-type="subsection"]::before { content: counter(sec) "." counter(sub) "\2002"; }
+.blk[data-type="theorem"], .blk[data-type="definition"] { counter-increment: thm; background: var(--thm);
+  border-left: 3px solid var(--accent); border-radius: 0; padding: 8px 14px; }
+.blk[data-type="theorem"] { font-style: italic; }
+.blk[data-type="theorem"]::before { content: "Theorem " counter(sec) "." counter(thm) ".\2002"; font-weight: 600; font-style: normal; }
+.blk[data-type="definition"]::before { content: "Definition " counter(sec) "." counter(thm) ".\2002"; font-weight: 600; }
+.blk[data-type="theorem"]::after, .blk[data-type="definition"]::after { left: -103px; }
+.blk[data-type="item"] { padding-left: 1.6em; margin-bottom: .3em; }
+.blk[data-type="item"]::before { content: "\2022"; position: absolute; left: .5em; }
+.blk[data-type="equation"] { counter-increment: eq; display: flex; justify-content: center; align-items: center; padding: .4em 3em; }
+.blk[data-type="equation"]::before { content: "(" counter(eq) ")"; position: absolute; right: 0; top: 50%; transform: translateY(-50%); }
+
+/* Math fields */
+math-field { border: 0; background: transparent; color: inherit; font-size: 1em; --caret-color: var(--accent);
+  --selection-background-color: var(--accent-bg); --contains-highlight-background-color: var(--accent-soft); }
+math-field::part(menu-toggle), math-field::part(virtual-keyboard-toggle) { display: none; }
+math-field:focus-within { outline: none; }
+.mwrap { display: inline-block; }
+math-field.inline { display: inline-block; min-width: 1.1em; padding: 0 2px; border-radius: 4px; vertical-align: -0.2em; }
+math-field.inline:focus-within { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+math-field.display { min-width: 4em; font-size: 1.15em; padding: 4px 10px; border-radius: 6px; }
+math-field.display:focus-within { background: var(--accent-soft); box-shadow: 0 0 0 1px var(--accent); }
+.mwrap math-field:not(:defined), .blk math-field:not(:defined) { font-family: var(--mono); font-size: 13px; color: var(--muted); }
+
+/* LaTeX dialog */
+dialog { border: 1px solid var(--border); border-radius: 12px; padding: 0; width: min(760px, 92vw); background: var(--paper); color: var(--text); }
+dialog::backdrop { background: rgba(0,0,0,.4); }
+dialog header { display: flex; align-items: center; gap: 8px; padding: 12px 16px; border-bottom: 1px solid var(--border); }
+dialog header h2 { margin: 0; font-size: 15px; font-weight: 600; flex: 1; }
+dialog button { font: inherit; color: var(--text); background: transparent; border: 1px solid var(--border); border-radius: 7px; height: 30px; padding: 0 10px; cursor: pointer; }
+dialog pre { margin: 0; padding: 16px; max-height: 65vh; overflow: auto; font: 12.5px/1.55 var(--mono); white-space: pre-wrap; }
+
+@media (max-width: 820px) {
+  .layout { grid-template-columns: 1fr; }
+  .sidebar { display: none; }
+  .main { padding: 16px; }
+  .paper { padding: 28px 18px 48px; }
+  .blk::after { display: none; }
+}
+@media print {
+  .toolbar, .sidebar { display: none; }
+  body, .main { background: #fff; overflow: visible; }
+  .layout { display: block; }
+  .paper { border: 0; padding: 0; max-width: none; }
+  .blk::after { display: none; }
+}
+</style>
+</head>
+<body>
+
+<div class="toolbar" id="toolbar">
+  <select id="blockType" title="Block type">
+    <option value="standard">Standard</option>
+    <option value="section">Section</option>
+    <option value="subsection">Subsection</option>
+    <option value="theorem">Theorem</option>
+    <option value="definition">Definition</option>
+    <option value="item">Itemize</option>
+  </select>
+  <span class="sep"></span>
+  <button class="icon" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+  <button class="icon" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+  <span class="sep"></span>
+  <button data-cmd="inline" title="Inline math ($ or Ctrl+M)">Inline math</button>
+  <button data-cmd="display" title="Numbered equation (Ctrl+Shift+M)">Equation</button>
+  <button data-cmd="keyboard" title="Show the on-screen math keyboard">Math keyboard</button>
+  <span class="spacer"></span>
+  <span class="status" id="status"></span>
+  <button data-cmd="new" title="Start a new document">New</button>
+  <button data-cmd="print" title="Print or save as PDF">Print / PDF</button>
+  <button class="primary" data-cmd="latex" title="View and export LaTeX">Export .tex</button>
+</div>
+
+<div class="layout">
+  <aside class="sidebar">
+    <h3>Outline</h3>
+    <nav class="outline" id="outline"></nav>
+    <div class="help">
+      <p><kbd>$</kbd> or <kbd>Ctrl</kbd>+<kbd>M</kbd> inline math<br>
+      <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> equation<br>
+      <kbd>Enter</kbd> new paragraph</p>
+      <p>Inside a formula:<br>
+      <kbd>/</kbd> fraction, <kbd>^</kbd> power, <kbd>_</kbd> subscript<br>
+      type <kbd>sqrt</kbd>, <kbd>int</kbd>, <kbd>sum</kbd>, <kbd>alpha</kbd>, <kbd>pi</kbd><br>
+      <kbd>&rarr;</kbd> / <kbd>Esc</kbd> to leave the formula</p>
+    </div>
+  </aside>
+  <main class="main">
+    <div class="paper">
+      <h1 id="docTitle" contenteditable="true" spellcheck="false"></h1>
+      <p id="docAuthor" contenteditable="true" spellcheck="false"></p>
+      <div id="editor" contenteditable="true" spellcheck="true"></div>
+    </div>
+  </main>
+</div>
+
+<dialog id="texDlg">
+  <header>
+    <h2>LaTeX source</h2>
+    <button id="copyTex">Copy</button>
+    <button id="downloadTex">Download .tex</button>
+    <button id="closeTex">Close</button>
+  </header>
+  <pre id="texOut"></pre>
+</dialog>
+
+<script>
+const ed = document.getElementById('editor');
+const typeSel = document.getElementById('blockType');
+const titleEl = document.getElementById('docTitle');
+const authorEl = document.getElementById('docAuthor');
+const statusEl = document.getElementById('status');
+const STORE_KEY = 'math-editor-doc-v1';
+const ZW = '\u200B';
+let savedRange = null;
+
+/* ---------- Building blocks ---------- */
+function block(type, ...content) {
+  const d = document.createElement('div');
+  d.className = 'blk';
+  d.dataset.type = type;
+  content.forEach(c => d.append(c));
+  if (!d.childNodes.length) d.innerHTML = '<br>';
+  return d;
+}
+function mathSpan(latex = '') {
+  const w = document.createElement('span');
+  w.className = 'mwrap';
+  w.contentEditable = 'false';
+  const mf = document.createElement('math-field');
+  mf.className = 'inline';
+  mf.textContent = latex;
+  w.appendChild(mf);
+  wire(mf);
+  return w;
+}
+function eqBlock(latex = '') {
+  const b = document.createElement('div');
+  b.className = 'blk';
+  b.dataset.type = 'equation';
+  b.contentEditable = 'false';
+  const mf = document.createElement('math-field');
+  mf.className = 'display';
+  mf.textContent = latex;
+  b.appendChild(mf);
+  wire(mf);
+  return b;
+}
+function latexOf(mf) {
+  return (mf.value !== undefined ? mf.value : mf.textContent) || '';
+}
+function isEmptyBlock(b) {
+  return !b.querySelector('math-field') && b.textContent.replace(/\u200B/g, '').trim() === '';
+}
+
+/* ---------- Caret helpers ---------- */
+function setCaret(node, offset) {
+  ed.focus({ preventScroll: true });
+  const r = document.createRange();
+  r.setStart(node, offset);
+  r.collapse(true);
+  const s = getSelection();
+  s.removeAllRanges();
+  s.addRange(r);
+  savedRange = r.cloneRange();
+}
+function caretAtStart(b) {
+  if (b.dataset.type === 'equation') { focusField(b.querySelector('math-field'), 'start'); return; }
+  const first = b.firstChild;
+  if (first && first.nodeType === 3) setCaret(first, first.data.startsWith(ZW) ? 1 : 0);
+  else setCaret(b, 0);
+}
+function caretAtEnd(b) {
+  if (b.dataset.type === 'equation') { focusField(b.querySelector('math-field'), 'end'); return; }
+  let last = b.lastChild;
+  if (last && last.nodeName === 'BR') last = last.previousSibling;
+  if (last && last.nodeType === 3) setCaret(last, last.data.length);
+  else setCaret(b, last ? Array.from(b.childNodes).indexOf(last) + 1 : 0);
+}
+function caretBeside(wrap, after) {
+  let t = after ? wrap.nextSibling : wrap.previousSibling;
+  if (!t || t.nodeType !== 3) {
+    t = document.createTextNode(ZW);
+    after ? wrap.after(t) : wrap.before(t);
+  }
+  if (after) setCaret(t, t.data.startsWith(ZW) ? 1 : 0);
+  else setCaret(t, t.data.length);
+}
+function focusField(mf, where) {
+  customElements.whenDefined('math-field').then(() => {
+    requestAnimationFrame(() => {
+      mf.focus();
+      if (where === 'start' && mf.executeCommand) mf.executeCommand('moveToMathfieldStart');
+      if (where === 'end' && mf.executeCommand) mf.executeCommand('moveToMathfieldEnd');
+    });
+  });
+}
+function currentBlock() {
+  const s = getSelection();
+  let node = null;
+  if (s.rangeCount && ed.contains(s.getRangeAt(0).startContainer)) node = s.getRangeAt(0).startContainer;
+  else if (document.activeElement && document.activeElement.tagName === 'MATH-FIELD' && ed.contains(document.activeElement)) node = document.activeElement;
+  else if (savedRange && ed.contains(savedRange.startContainer)) node = savedRange.startContainer;
+  if (!node) return null;
+  const el = node.nodeType === 1 ? node : node.parentElement;
+  const b = el && el.closest('.blk');
+  return b && ed.contains(b) ? b : null;
+}
+function restoreRange() {
+  const s = getSelection();
+  if (s.rangeCount && ed.contains(s.getRangeAt(0).startContainer)) return s.getRangeAt(0);
+  if (savedRange && ed.contains(savedRange.startContainer)) {
+    ed.focus({ preventScroll: true });
+    s.removeAllRanges();
+    s.addRange(savedRange);
+    return s.getRangeAt(0);
+  }
+  const last = ed.lastElementChild;
+  if (last && last.dataset.type !== 'equation') { caretAtEnd(last); return s.getRangeAt(0); }
+  const nb = block('standard');
+  ed.appendChild(nb);
+  caretAtStart(nb);
+  return s.getRangeAt(0);
+}
+
+/* ---------- Math field wiring ---------- */
+function wire(mf) {
+  if (mf._wired) return;
+  mf._wired = true;
+  const isDisplay = mf.classList.contains('display');
+
+  mf.addEventListener('keydown', e => {
+    e.stopPropagation();
+    if (isDisplay) {
+      const b = mf.closest('.blk');
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        let next = b.nextElementSibling;
+        if (!next || next.dataset.type === 'equation') { next = block('standard'); b.after(next); }
+        mf.blur();
+        caretAtStart(next);
+        refresh();
+      } else if (e.key === 'Backspace' && latexOf(mf) === '') {
+        e.preventDefault();
+        const prev = b.previousElementSibling;
+        b.remove();
+        if (prev) caretAtEnd(prev); else { const nb = block('standard'); ed.prepend(nb); caretAtStart(nb); }
+        refresh();
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        let next = b.nextElementSibling;
+        if (!next) { next = block('standard'); b.after(next); }
+        mf.blur(); caretAtStart(next);
+      }
+    } else {
+      const w = mf.closest('.mwrap');
+      if (e.key === 'Enter' || e.key === 'Escape' || (e.key === '$')) {
+        e.preventDefault();
+        mf.blur();
+        caretBeside(w, true);
+      } else if (e.key === 'Backspace' && latexOf(mf) === '') {
+        e.preventDefault();
+        const prev = w.previousSibling;
+        w.remove();
+        if (prev && prev.nodeType === 3) setCaret(prev, prev.data.length);
+        refresh();
+      }
+    }
+  });
+
+  mf.addEventListener('move-out', e => {
+    e.preventDefault();
+    const dir = e.detail && e.detail.direction;
+    const forward = dir === 'forward' || dir === 'downward';
+    mf.blur();
+    if (isDisplay) {
+      const b = mf.closest('.blk');
+      let target = forward ? b.nextElementSibling : b.previousElementSibling;
+      if (!target) { target = block('standard'); forward ? b.after(target) : b.before(target); }
+      forward ? caretAtStart(target) : caretAtEnd(target);
+    } else {
+      caretBeside(mf.closest('.mwrap'), forward);
+    }
+  });
+
+  mf.addEventListener('input', scheduleSave);
+  mf.addEventListener('focus', () => markCurrent(mf.closest('.blk')));
+}
+
+/* ---------- Inserting math ---------- */
+function insertInlineMath() {
+  const r = restoreRange();
+  const b = currentBlock();
+  if (!b || b.dataset.type === 'equation') return;
+  const initial = r.toString().replace(/\u200B/g, '');
+  r.deleteContents();
+  const w = mathSpan(initial);
+  r.insertNode(w);
+  if (b.childNodes.length === 2 && b.lastChild.nodeName === 'BR') b.lastChild.remove();
+  ensureCaretRoom(b);
+  focusField(w.firstChild, 'end');
+  refresh();
+}
+function insertDisplayMath() {
+  restoreRange();
+  const b = currentBlock();
+  const eq = eqBlock('');
+  if (!b) { ed.appendChild(eq); }
+  else if (b.dataset.type === 'equation') { b.after(eq); }
+  else if (isEmptyBlock(b)) { b.replaceWith(eq); }
+  else {
+    const nb = splitBlock(true);
+    if (nb) {
+      nb.before(eq);
+      if (isEmptyBlock(b)) b.remove();
+      if (isEmptyBlock(nb) && nb.nextElementSibling) nb.remove();
+    } else b.after(eq);
+  }
+  if (!eq.nextElementSibling) eq.after(block('standard'));
+  focusField(eq.querySelector('math-field'));
+  refresh();
+}
+
+/* ---------- Splitting paragraphs (Enter) ---------- */
+function splitBlock(silent) {
+  const s = getSelection();
+  if (!s.rangeCount) return null;
+  const r = s.getRangeAt(0);
+  r.deleteContents();
+  const b = currentBlock();
+  if (!b) return null;
+  const type = b.dataset.type;
+
+  if (!silent && type === 'item' && isEmptyBlock(b)) {
+    b.dataset.type = 'standard';
+    refresh();
+    return null;
+  }
+  const tail = document.createRange();
+  tail.setStart(r.startContainer, r.startOffset);
+  tail.setEnd(b, b.childNodes.length);
+  const frag = tail.extractContents();
+  const nb = block(type === 'item' ? 'item' : 'standard');
+  nb.innerHTML = '';
+  nb.appendChild(frag);
+  nb.querySelectorAll('math-field').forEach(m => { m._wired = false; wire(m); });
+  if (isEmptyBlock(nb)) nb.innerHTML = '<br>';
+  if (isEmptyBlock(b)) b.innerHTML = '<br>';
+  ensureCaretRoom(b); ensureCaretRoom(nb);
+  b.after(nb);
+  if (!silent) caretAtStart(nb);
+  refresh();
+  return nb;
+}
+
+/* ---------- Keeping the document tidy ---------- */
+function ensureCaretRoom(b) {
+  b.querySelectorAll(':scope > .mwrap').forEach(w => {
+    if (!w.previousSibling || w.previousSibling.nodeType !== 3) w.before(document.createTextNode(ZW));
+    if (!w.nextSibling || w.nextSibling.nodeType !== 3) w.after(document.createTextNode(ZW));
+  });
+}
+function normalize() {
+  Array.from(ed.childNodes).forEach(n => {
+    if (n.nodeType === 1 && n.classList.contains('blk')) return;
+    if (n.nodeType === 3 && !n.data.trim()) { n.remove(); return; }
+    const b = block('standard');
+    b.innerHTML = '';
+    n.replaceWith(b);
+    b.appendChild(n.nodeType === 1 && n.tagName === 'DIV' ? document.createRange().createContextualFragment(n.innerHTML) : n);
+  });
+  if (!ed.firstElementChild) ed.appendChild(block('standard'));
+  ed.querySelectorAll('.blk').forEach(b => {
+    if (!b.dataset.type) b.dataset.type = 'standard';
+    if (b.dataset.type !== 'equation' && !b.childNodes.length) b.innerHTML = '<br>';
+  });
+  ed.querySelectorAll('math-field').forEach(wire);
+}
+function markCurrent(b) {
+  ed.querySelectorAll('.blk.current').forEach(x => x !== b && x.classList.remove('current'));
+  if (b) {
+    b.classList.add('current');
+    if (b.dataset.type !== 'equation') typeSel.value = b.dataset.type;
+  }
+}
+
+/* ---------- Outline ---------- */
+function buildOutline() {
+  const nav = document.getElementById('outline');
+  nav.innerHTML = '';
+  let sec = 0, sub = 0, thm = 0;
+  ed.querySelectorAll('.blk').forEach(b => {
+    const t = b.dataset.type;
+    let label = null, cls = '';
+    const text = b.textContent.replace(/\u200B/g, '').trim() || '(empty)';
+    if (t === 'section') { sec++; sub = 0; thm = 0; label = sec + '  ' + text; }
+    else if (t === 'subsection') { sub++; label = sec + '.' + sub + '  ' + text; cls = 'sub'; }
+    else if (t === 'theorem' || t === 'definition') { thm++; label = (t === 'theorem' ? 'Theorem ' : 'Definition ') + sec + '.' + thm; cls = 'thm'; }
+    if (!label) return;
+    const a = document.createElement('a');
+    a.textContent = label.length > 40 ? label.slice(0, 38) + '…' : label;
+    if (cls) a.className = cls;
+    a.onclick = () => { b.scrollIntoView({ behavior: 'smooth', block: 'center' }); caretAtEnd(b); markCurrent(b); };
+    nav.appendChild(a);
+  });
+  if (!nav.childNodes.length) nav.innerHTML = '<span style="color:var(--faint);font-size:12px">Add a section to see it here.</span>';
+}
+function refresh() { normalize(); buildOutline(); scheduleSave(); }
+
+/* ---------- LaTeX export ---------- */
+function esc(s) {
+  return s.replace(/\u200B/g, '').replace(/[\\{}$&#^_%~]/g, c => ({
+    '\\': '\\textbackslash{}', '{': '\\{', '}': '\\}', '$': '\\$', '&': '\\&', '#': '\\#',
+    '^': '\\^{}', '_': '\\_', '%': '\\%', '~': '\\textasciitilde{}'
+  })[c]);
+}
+function inlineTex(node) {
+  let out = '';
+  node.childNodes.forEach(n => {
+    if (n.nodeType === 3) { out += esc(n.data); return; }
+    if (n.nodeType !== 1) return;
+    if (n.classList.contains('mwrap')) {
+      const v = latexOf(n.querySelector('math-field')).trim();
+      if (v) out += '$' + v + '$';
+      return;
+    }
+    if (n.tagName === 'BR') return;
+    const inner = inlineTex(n);
+    const tag = n.tagName;
+    if (tag === 'B' || tag === 'STRONG') out += '\\textbf{' + inner + '}';
+    else if (tag === 'I' || tag === 'EM') out += '\\emph{' + inner + '}';
+    else if (tag === 'U') out += '\\underline{' + inner + '}';
+    else out += inner;
+  });
+  return out.replace(/[ \t]+/g, ' ');
+}
+function toTex() {
+  const lines = [
+    '\\documentclass[11pt]{article}',
+    '\\usepackage[utf8]{inputenc}',
+    '\\usepackage{amsmath, amssymb, amsthm}',
+    '',
+    '\\newtheorem{theorem}{Theorem}[section]',
+    '\\theoremstyle{definition}',
+    '\\newtheorem{definition}[theorem]{Definition}',
+    '',
+    '\\title{' + esc(titleEl.textContent.trim() || 'Untitled document') + '}',
+    '\\author{' + esc(authorEl.textContent.trim()) + '}',
+    '\\date{\\today}',
+    '',
+    '\\begin{document}',
+    '\\maketitle',
+    ''
+  ];
+  let inList = false;
+  ed.querySelectorAll('.blk').forEach(b => {
+    const t = b.dataset.type;
+    if (t !== 'item' && inList) { lines.push('\\end{itemize}', ''); inList = false; }
+    const c = t === 'equation' ? '' : inlineTex(b).trim();
+    switch (t) {
+      case 'section': lines.push('\\section{' + c + '}', ''); break;
+      case 'subsection': lines.push('\\subsection{' + c + '}', ''); break;
+      case 'theorem': lines.push('\\begin{theorem}', c, '\\end{theorem}', ''); break;
+      case 'definition': lines.push('\\begin{definition}', c, '\\end{definition}', ''); break;
+      case 'item':
+        if (!inList) { lines.push('\\begin{itemize}'); inList = true; }
+        lines.push('  \\item ' + c); break;
+      case 'equation': {
+        const v = latexOf(b.querySelector('math-field')).trim();
+        if (v) lines.push('\\begin{equation}', '  ' + v, '\\end{equation}', '');
+        break;
+      }
+      default: if (c) lines.push(c, '');
+    }
+  });
+  if (inList) lines.push('\\end{itemize}', '');
+  lines.push('\\end{document}', '');
+  return lines.join('\n');
+}
+function slug() {
+  return (titleEl.textContent.trim() || 'document').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'document';
+}
+
+/* ---------- Saving (in this browser only) ---------- */
+let saveTimer = null;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(save, 600);
+}
+function save() {
+  try {
+    const clone = ed.cloneNode(true);
+    const orig = ed.querySelectorAll('math-field');
+    clone.querySelectorAll('math-field').forEach((m, i) => {
+      const cls = m.className;
+      Array.from(m.attributes).forEach(a => m.removeAttribute(a.name));
+      m.className = cls;
+      m.textContent = latexOf(orig[i]);
+    });
+    clone.querySelectorAll('.current').forEach(x => x.classList.remove('current'));
+    localStorage.setItem(STORE_KEY, JSON.stringify({
+      title: titleEl.textContent, author: authorEl.textContent, html: clone.innerHTML
+    }));
+    statusEl.textContent = 'Saved in this browser';
+  } catch (e) {
+    statusEl.textContent = '';
+  }
+}
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (!raw) return false;
+    const d = JSON.parse(raw);
+    titleEl.textContent = d.title || '';
+    authorEl.textContent = d.author || '';
+    ed.innerHTML = d.html || '';
+    return !!d.html;
+  } catch (e) { return false; }
+}
+
+/* ---------- Sample document ---------- */
+function sample() {
+  titleEl.textContent = 'A short note on integrals';
+  authorEl.textContent = 'Your name';
+  ed.innerHTML = '';
+  ed.append(
+    block('section', 'Introduction'),
+    block('standard', 'Let ', mathSpan('f:[a,b]\\to\\mathbb{R}'), ' be continuous and let ', mathSpan('F'),
+      ' be any antiderivative of ', mathSpan('f'), ', so that ', mathSpan("F'=f"),
+      '. Click any formula to edit it, or type $ to start a new one.'),
+    block('definition', 'A function ', mathSpan('F'), ' is an antiderivative of ', mathSpan('f'),
+      ' on ', mathSpan('[a,b]'), ' if ', mathSpan("F'(x)=f(x)"), ' for every ', mathSpan('x\\in[a,b]'), '.'),
+    block('section', 'Main result'),
+    block('theorem', 'If ', mathSpan('f'), ' is continuous on ', mathSpan('[a,b]'), ' and ', mathSpan('F'),
+      ' is an antiderivative of ', mathSpan('f'), ', then'),
+    eqBlock('\\int_a^b f(x)\\,dx=F(b)-F(a)'),
+    block('standard', 'For example, with ', mathSpan('f(x)=x^2'), ' we get ', mathSpan('\\int_0^1x^2\\,dx=\\frac{1}{3}'), '.'),
+    block('section', 'Using this editor'),
+    block('item', 'Pick a block type from the menu at the top left: section, theorem, list item and so on.'),
+    block('item', 'Type $ or press Ctrl+M for inline math. Inside a formula, / makes a fraction, ^ a power, and typing sqrt gives a root.'),
+    block('item', 'Press Ctrl+Shift+M (or the Equation button) for a numbered display equation.'),
+    block('item', 'Export .tex gives you a LaTeX file you can compile with pdflatex or upload to Overleaf.')
+  );
+}
+
+/* ---------- Events ---------- */
+ed.addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('math-field')) return;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && (e.key === 'm' || e.key === 'M')) {
+    e.preventDefault();
+    e.shiftKey ? insertDisplayMath() : insertInlineMath();
+    return;
+  }
+  if (e.key === '$' && !mod) { e.preventDefault(); insertInlineMath(); return; }
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); splitBlock(false); return; }
+  if (e.key === 'Backspace') {
+    const s = getSelection();
+    const b = currentBlock();
+    if (b && s.isCollapsed && b.dataset.type !== 'standard' && b.dataset.type !== 'equation') {
+      const r = document.createRange();
+      r.setStart(b, 0);
+      r.setEnd(s.getRangeAt(0).startContainer, s.getRangeAt(0).startOffset);
+      if (r.toString().replace(/\u200B/g, '') === '' && !r.cloneContents().querySelector('math-field')) {
+        e.preventDefault();
+        b.dataset.type = 'standard';
+        markCurrent(b);
+        refresh();
+      }
+    }
+  }
+});
+ed.addEventListener('input', () => { normalize(); buildOutline(); scheduleSave(); });
+ed.addEventListener('paste', e => {
+  e.preventDefault();
+  const text = (e.clipboardData || window.clipboardData).getData('text/plain');
+  document.execCommand('insertText', false, text);
+});
+titleEl.addEventListener('input', scheduleSave);
+authorEl.addEventListener('input', scheduleSave);
+[titleEl, authorEl].forEach(el => el.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); if (el === titleEl) authorEl.focus(); else caretAtStart(ed.firstElementChild); }
+}));
+
+document.addEventListener('selectionchange', () => {
+  const s = getSelection();
+  if (!s.rangeCount) return;
+  const r = s.getRangeAt(0);
+  if (ed.contains(r.startContainer)) {
+    savedRange = r.cloneRange();
+    markCurrent(currentBlock());
+  }
+});
+
+typeSel.addEventListener('change', () => {
+  restoreRange();
+  const b = currentBlock();
+  if (b && b.dataset.type !== 'equation') {
+    b.dataset.type = typeSel.value;
+    caretAtEnd(b);
+    markCurrent(b);
+    refresh();
+  }
+});
+
+document.getElementById('toolbar').addEventListener('mousedown', e => {
+  if (e.target.closest('button')) e.preventDefault();
+});
+document.getElementById('toolbar').addEventListener('click', e => {
+  const btn = e.target.closest('button[data-cmd]');
+  if (!btn) return;
+  const cmd = btn.dataset.cmd;
+  if (cmd === 'bold' || cmd === 'italic') { restoreRange(); document.execCommand(cmd); scheduleSave(); }
+  else if (cmd === 'inline') insertInlineMath();
+  else if (cmd === 'display') insertDisplayMath();
+  else if (cmd === 'keyboard') {
+    const kb = window.mathVirtualKeyboard;
+    if (!kb) return;
+    if (kb.visible) kb.hide();
+    else {
+      const active = document.activeElement;
+      if (!(active && active.tagName === 'MATH-FIELD')) insertInlineMath();
+      setTimeout(() => kb.show(), 60);
+    }
+  }
+  else if (cmd === 'latex') {
+    document.getElementById('texOut').textContent = toTex();
+    document.getElementById('texDlg').showModal();
+  }
+  else if (cmd === 'print') window.print();
+  else if (cmd === 'new') {
+    if (confirm('Start a new, empty document? The current one will be replaced.')) {
+      titleEl.textContent = ''; authorEl.textContent = '';
+      ed.innerHTML = '';
+      ed.appendChild(block('standard'));
+      refresh();
+      caretAtStart(ed.firstElementChild);
+    }
+  }
+});
+
+document.getElementById('closeTex').onclick = () => document.getElementById('texDlg').close();
+document.getElementById('copyTex').onclick = async e => {
+  try { await navigator.clipboard.writeText(document.getElementById('texOut').textContent); e.target.textContent = 'Copied'; }
+  catch (err) { e.target.textContent = 'Select and copy'; }
+  setTimeout(() => e.target.textContent = 'Copy', 1500);
+};
+document.getElementById('downloadTex').onclick = () => {
+  const blob = new Blob([document.getElementById('texOut').textContent], { type: 'text/x-tex' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = slug() + '.tex';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+};
+
+/* ---------- Start ---------- */
+if (!load()) sample();
+ed.querySelectorAll('.blk').forEach(ensureCaretRoom);
+normalize();
+buildOutline();
+</script>
+</body>
+</html>

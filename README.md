@@ -108,6 +108,12 @@ powers VS Code.
   and `\cite{}` it completes from your project's actual labels and `.bib` keys,
   showing the title, author and year of each entry as you pick.
 - **BibTeX IntelliSense** — entry types after `@`, and field names inside an entry.
+- **Zotero import** — in the citation picker (`/cite`), the **Zotero** tab
+  searches the Zotero app running on your machine and adds the chosen items to
+  your project's `.bib` file. Turn on *Settings → Advanced → Allow other
+  applications on this computer to communicate with Zotero* in Zotero 7, or
+  install [Better BibTeX](https://retorque.re/zotero-better-bibtex/) to use its
+  stable citation keys. Nothing is sent over the network.
 - **Document outline** of every chapter, section and subsection, tracking your
   cursor and jumping you anywhere in the file with a click.
 - **Matched `\begin`/`\end` colouring** so nested environments are obvious at a
@@ -351,6 +357,7 @@ front of it.
 | `services/synctex.py`, `services/synctex_reader.py` | PDF ↔ source lookups; the reader is a Python port of the `synctex` tool's logic, so no TeX install is needed |
 | `services/snippets.py` | User snippets, stored in `~/.gitlatex/snippets.json` |
 | `services/projectindex.py` | Parsing `\label{}` and BibTeX entries for autocomplete |
+| `services/zotero.py` | Searching and exporting from the local Zotero app (local API or Better BibTeX) |
 | `services/paths.py` | Path safety and project tree walking |
 | `services/updates.py` | The cached PyPI version check |
 | `services/comments.py` | Review comment threads, stored in `.gitlatex/comments/` |

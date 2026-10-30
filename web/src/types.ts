@@ -43,8 +43,16 @@ export type ThemeMode = 'dark' | 'light' | 'system';
  */
 export type CompilerMode = 'auto' | 'browser' | 'local' | 'api';
 
+/**
+ * How .tex files are edited: `default` is the LaTeX source in Monaco, `lyx` a
+ * LyX-style WYSIWYM document (formulas, layouts and insets; raw LaTeX only in
+ * red TeX-code boxes).
+ */
+export type EditorStyle = 'default' | 'lyx';
+
 export interface Settings {
   theme: ThemeMode;
+  editorStyle: EditorStyle;
   compiler: CompilerMode;
   /** Write the PDF built in the browser into the project folder (as local builds do). */
   savePdf: boolean;
@@ -72,6 +80,7 @@ export interface Settings {
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
+  editorStyle: 'default',
   compiler: 'auto',
   savePdf: true,
   vim: false,

@@ -25,7 +25,8 @@ export type Dialog =
   | { type: 'collab' }
   | { type: 'command-palette' }
   | { type: 'shortcuts' }
-  | { type: 'wizard'; wizard: Wizard }
+  /** `source`/`query`: open the citation picker on its Zotero tab, already searching. */
+  | { type: 'wizard'; wizard: Wizard; source?: 'project' | 'zotero'; query?: string }
   | { type: 'prompt'; title: string; label: string; value: string; placeholder?: string; confirm: string; onSubmit: (v: string) => void | Promise<void>; onCancel?: () => void }
   | { type: 'confirm'; title: string; message: string; confirm: string; danger?: boolean; onConfirm: () => void | Promise<void>; onCancel?: () => void }
   | { type: 'diff'; title: string; path: string; original: string; modified: string; onRestore?: () => void };

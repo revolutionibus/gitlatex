@@ -230,3 +230,33 @@ export const scm = {
   publish: (opts: { url?: string; name?: string; private?: boolean }) => post<ScmResult>('/api/scm/publish', opts),
   diff: (path: string, staged: boolean) => get<FileDiff>(`/api/scm/diff${qs({ path, staged: staged ? '1' : '0' })}`),
 };
+
+// ---- Zotero (gitlatex/routes/zotero.py) ------------------------------------------------
+
+export type ZoteroSource = 'betterBibtex' | 'localApi';
+
+export interface ZoteroStatus {
+  running: boolean;
+  betterBibtex: boolean;
+  localApi: boolean;
+  /** Why Zotero cannot be used, when it cannot. */
+  message: string | null;
+}
+
+export interface ZoteroItem {
+  /** What export() takes: a citation key with Better BibTeX, else a Zotero item key. */
+  id: string;
+  /** The citation key, when known before export. */
+  key: string | null;
+  title: string;
+  creators: string[];
+  year: string;
+  type: string;
+  where: string;
+}
+
+export const zotero = {
+  status: () => get<ZoteroStatus>('/api/zotero/status'),
+  search: (q: string) => get<{ source: ZoteroSource; items: ZoteroItem[] }>('/api/zotero/search' + qs({ q })),
+  export: (ids: string[], source: ZoteroSource, biblatex: boolean) => post<{ bibtex: string }>('/api/zotero/export', { ids, source, biblatex }),
+};

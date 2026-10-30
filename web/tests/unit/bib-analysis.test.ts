@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { formatEntry, parseBib } from '../../src/latex/bib';
+import { formatEntry, mergeBib, parseBib } from '../../src/latex/bib';
 import { labels, loadedPackages, outline, packageInsertion, userMacros, wordCount } from '../../src/latex/analysis';
 
 describe('parseBib', () => {
@@ -72,5 +72,22 @@ Some words here $x^2$ and \textbf{bold}.
 
   it('counts words in the body only', () => {
     expect(wordCount(files[0].text)).toBe(7); // Intro Some words here and bold Details
+  });
+});
+
+describe('mergeBib', () => {
+  const existing = '@book{knuth1984,\n  title = {The TeXbook}\n}\n';
+  it('appends new records and skips keys already present', () => {
+    const r = mergeBib(existing, '@book{knuth1984,\n  title = {Dup}\n}\n\n@article{lamport1994,\n  title = {LaTeX}\n}\n');
+    expect(r.keys).toEqual(['knuth1984', 'lamport1994']);
+    expect(r.added).toEqual(['lamport1994']);
+    expect(r.text).toBe(existing + '\n@article{lamport1994,\n  title = {LaTeX}\n}\n');
+    expect(parseBib(r.text).map((e) => e.key)).toEqual(['knuth1984', 'lamport1994']);
+  });
+  it('leaves the file untouched when nothing is new', () => {
+    expect(mergeBib(existing, '@book{knuth1984, title = {x}}').text).toBe(existing);
+  });
+  it('starts an empty file without a leading blank line', () => {
+    expect(mergeBib('', '@comment{jabref}\n@misc{a, title={A}}').text).toBe('@misc{a, title={A}}\n');
   });
 });

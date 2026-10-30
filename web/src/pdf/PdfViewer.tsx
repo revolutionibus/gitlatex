@@ -153,6 +153,10 @@ export const PdfViewer = forwardRef<
   const taskRef = useRef<pdfjs.PDFDocumentLoadingTask | null>(null);
   const location = useRef<ViewLocation | null>(null);
   const pendingTarget = useRef<{ rects: SyncRect[]; nonce: number } | null>(null);
+  /** The `version` of the document on screen: a target that comes with a rebuild waits for it. */
+  const shownVersion = useRef<number | null>(null);
+  const versionRef = useRef(version);
+  versionRef.current = version;
   const [error, setError] = useState<string | null>(null);
   const [markAt, setMarkAt] = useState<{ left: number; top: number } | null>(null);
   // pdf.js events outlive a render; they read the current props from here.
@@ -224,7 +228,7 @@ export const PdfViewer = forwardRef<
 
   useEffect(() => {
     if (!target || !target.rects.length) return;
-    if (viewerRef.current?.pdfViewer.pdfDocument) showTarget(target);
+    if (viewerRef.current?.pdfViewer.pdfDocument && shownVersion.current === versionRef.current) showTarget(target);
     else pendingTarget.current = target;
   }, [target, showTarget]);
 
@@ -248,6 +252,7 @@ export const PdfViewer = forwardRef<
           'pagesinit',
           () => {
             if (taskRef.current !== task) return void cover?.remove();
+            shownVersion.current = version;
             const { pdfViewer } = v;
             applyZoom(pdfViewer, props.current.zoom);
             if (keep) {

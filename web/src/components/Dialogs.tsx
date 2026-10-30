@@ -44,7 +44,7 @@ function DialogSwitch({ dialog }: { dialog: Dialog }) {
     case 'shortcuts':
       return <ShortcutsDialog />;
     case 'wizard':
-      return <WizardDialog wizard={dialog.wizard} />;
+      return <WizardDialog wizard={dialog.wizard} source={dialog.source} query={dialog.query} />;
     case 'diff':
       return <DiffDialog d={dialog} />;
     case 'publish':
@@ -161,6 +161,24 @@ function SettingsDialog({ section: jumpTo }: { section?: 'about' }) {
           {(['dark', 'light', 'system'] as const).map((t) => (
             <button key={t} onClick={() => setTheme(t)} className={clsx('rounded-md border px-3 py-1 text-xs capitalize', s.theme === t ? 'border-accent bg-accent/15 text-fg' : 'border-line text-muted')}>
               {t}
+            </button>
+          ))}
+        </div>
+      </div>
+      <div className="py-2">
+        <div className="text-[13px] text-fg">Editor style for .tex files</div>
+        <div className="mt-1.5 grid grid-cols-2 gap-1.5">
+          {([
+            ['default', 'Default', 'The LaTeX source, with completion, snippets and Vim mode'],
+            ['lyx', 'LyX style', 'WYSIWYM: layouts, live formulas and insets; LaTeX only in TeX-code boxes'],
+          ] as const).map(([id, label, hint]) => (
+            <button
+              key={id}
+              onClick={() => updateSettings({ editorStyle: id })}
+              className={clsx('rounded-lg border p-2 text-left', s.editorStyle === id ? 'border-accent bg-accent/10' : 'border-line hover:bg-hover')}
+            >
+              <div className="text-[13px] font-medium text-fg">{label}</div>
+              <div className="mt-0.5 text-[11px] leading-snug text-muted">{hint}</div>
             </button>
           ))}
         </div>
@@ -497,6 +515,7 @@ function ShortcutsDialog() {
   const rows: [string, string][] = [
     [`${modKey}+Enter  /  ${modKey}+S`, 'Compile'],
     [`${modKey}+Shift+P`, 'Command palette'],
+    [`${modKey}+Shift+C`, 'Insert citation (this project or Zotero)'],
     ['/', 'Slash commands (on an empty line or after a space)'],
     [`${modKey}+Space`, 'Autocomplete (commands, \\cite keys, \\ref labels, files)'],
     [`${modKey}+B / ${modKey}+I / ${modKey}+U`, 'Bold / italic / underline'],

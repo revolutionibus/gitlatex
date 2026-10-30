@@ -1,7 +1,8 @@
 /**
  * Editor area: tabs, formatting bar, the Monaco editor (with slash menu, live
- * math preview, Vim mode, spell checking, snippets and review comments) and
- * previews for binary files.
+ * math preview, Vim mode, spell checking, snippets and review comments), the
+ * LyX-style editor for .tex files when that style is chosen, and previews for
+ * binary files.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
@@ -14,7 +15,7 @@ import { editorBridge } from './bridge';
 import { registerProviders, mathAt } from './providers';
 import { SlashMenu, MathPreview } from './SlashMenu';
 import { filterSlash, SLASH_COMMANDS, type SlashCommand } from './slash-commands';
-import { useStore, getState, setState, openDialog, promptText, toast } from '../state/store';
+import { useStore, getState, setState, openDialog, promptText, toast, updateSettings } from '../state/store';
 import { installSpellCheck, setSpellCheckEnabled } from './spell';
 import { installSnippets } from './snippets';
 import { installReview } from './review';
@@ -27,6 +28,7 @@ import {
 import { basename, extname, isImagePath } from '../utils/paths';
 import { formatBytes, modKey } from '../utils/misc';
 import { IconButton, Button, EmptyState } from '../components/ui';
+import { LyxPane } from '../lyx/LyxPane';
 import { FileIcon } from '../components/FileIcon';
 
 registerLanguages();
@@ -55,6 +57,9 @@ function onLinkArgument(line: string, column: number) {
   }
   return false;
 }
+
+/** Whether `path` opens in the LyX-style editor. */
+const isLyxFile = (path: string | null | undefined, style = getState().settings.editorStyle) => style === 'lyx' && !!path && extname(path) === 'tex';
 
 const vimHooks: VimHooks = {
   currentFile: () => getState().activePath,
@@ -88,6 +93,7 @@ export function EditorPane() {
 
   const file = activePath ? workspace()?.get(activePath) : undefined;
   const isText = file?.kind === 'text';
+  const lyx = isText && isLyxFile(activePath, settings.editorStyle);
   void treeVersion;
 
   const slashItems = useMemo(() => (slash ? filterSlash(slash.query) : SLASH_COMMANDS), [slash]);
@@ -153,6 +159,7 @@ export function EditorPane() {
       openFile,
       applyQuickFix,
       ensurePackage,
+      searchZotero: (query) => openDialog({ type: 'wizard', wizard: 'cite', source: 'zotero', query }),
     });
 
     const spell = installSpellCheck(editor, s.spellCheck);
@@ -204,6 +211,14 @@ export function EditorPane() {
       forwardSearch(pos.lineNumber);
     });
     editor.addCommand(M.CtrlCmd | M.Shift | K.KeyP, () => openDialog({ type: 'command-palette' }));
+    editor.addAction({
+      id: 'gitlatex.insertCitation',
+      label: 'Insert citation…',
+      keybindings: [M.CtrlCmd | M.Shift | K.KeyC],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0.6,
+      run: () => openDialog({ type: 'wizard', wizard: 'cite' }),
+    });
     const wrap = (cmd: string) => () => {
       const sel = editor.getSelection();
       const model = editor.getModel();
@@ -375,7 +390,7 @@ export function EditorPane() {
     const vs = viewStates.current.get(activePath);
     if (vs) editor.restoreViewState(vs);
     applyMarkers();
-    if (!getState().dialog) editor.focus(); // never steal focus from an open dialog
+    if (!getState().dialog && !isLyxFile(activePath)) editor.focus(); // never steal focus from an open dialog
   }, [activePath, isText, epoch]);
 
   // Forget per-file view state when another project is opened.
@@ -388,7 +403,7 @@ export function EditorPane() {
   const flash = useRef<monaco.editor.IEditorDecorationsCollection | null>(null);
   useEffect(() => {
     const editor = editorRef.current;
-    if (!editor || !reveal || reveal.path !== activePath) return;
+    if (!editor || !reveal || reveal.path !== activePath || isLyxFile(activePath)) return; // LyxPane shows its own
     const t = setTimeout(() => {
       const line = Math.max(1, Math.min(reveal.line, editor.getModel()?.getLineCount() ?? 1));
       editor.revealLineInCenter(line, monaco.editor.ScrollType.Smooth);
@@ -465,10 +480,28 @@ export function EditorPane() {
           </div>
         ))}
       </div>
+      {isText && extname(activePath ?? '') === 'tex' && (
+        <div className="flex shrink-0 items-center gap-0.5 px-2" role="group" aria-label="Editor style">
+          {([
+            ['default', 'Source', 'Edit the LaTeX source'],
+            ['lyx', 'LyX', 'Edit in the LyX style: layouts, live formulas and insets (WYSIWYM)'],
+          ] as const).map(([id, label, title]) => (
+            <button
+              key={id}
+              title={title}
+              aria-pressed={settings.editorStyle === id}
+              onClick={() => updateSettings({ editorStyle: id })}
+              className={clsx('rounded px-2 py-0.5 text-[11.5px]', settings.editorStyle === id ? 'bg-accent/15 font-medium text-fg' : 'text-muted hover:bg-hover hover:text-fg')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       </div>
 
       {/* Formatting bar (great for beginners) */}
-      {settings.formatBar && isText && extname(activePath ?? '') === 'tex' && (
+      {settings.formatBar && isText && !lyx && extname(activePath ?? '') === 'tex' && (
         <div className="flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-2">
           <IconButton size="sm" label={`Bold (${modKey}+B)`} onClick={fmt('bold')}><Bold className="size-3.5" /></IconButton>
           <IconButton size="sm" label={`Italic (${modKey}+I)`} onClick={fmt('italic')}><Italic className="size-3.5" /></IconButton>
@@ -494,7 +527,7 @@ export function EditorPane() {
       )}
 
       {/* Monaco, with the Vim status bar under it */}
-      <div className={clsx('flex min-h-0 flex-1', !isText && 'hidden')}>
+      <div className={clsx('flex min-h-0 flex-1', (!isText || lyx) && 'hidden')}>
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
             <div ref={hostRef} className="absolute inset-0" data-testid="editor" />
@@ -502,6 +535,8 @@ export function EditorPane() {
           <div ref={vimBarRef} className={clsx('vim-statusbar', !settings.vim && 'hidden')} />
         </div>
       </div>
+
+      {lyx && activePath && <LyxPane key={activePath} path={activePath} />}
 
       {/* Binary / empty states */}
       {!isText && (

@@ -17,6 +17,7 @@ blueprint below - nothing else in the app needs to know about it.
     scm           the Source control panel: staging, conflicts, branches, publish
     workspace     the file API behind the editor UI in web/
     engine        the in-browser TeX engine and its package shelf
+    zotero        searching the local Zotero library and importing BibTeX
 
 `pages` is registered last: its catch-all route serves the app for unknown
 paths, so every real endpoint must be matched before it.
@@ -37,6 +38,7 @@ from gitlatex.routes import (
     synctex,
     system,
     workspace,
+    zotero,
 )
 
 BLUEPRINTS = (
@@ -53,6 +55,7 @@ BLUEPRINTS = (
     scm.bp,
     workspace.bp,
     engine.bp,
+    zotero.bp,
     pages.bp,
 )
 

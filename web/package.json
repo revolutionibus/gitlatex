@@ -30,6 +30,7 @@
     "katex": "^0.18.9",
     "lucide-react": "^1.49.0",
     "material-symbols": "^0.47.5",
+    "mathlive": "^0.111.1",
     "monaco-editor": "^0.57.0",
     "monaco-vim": "^0.4.4",
     "pdfjs-dist": "github:revolutionibus/pdf.js#v1.0.1",

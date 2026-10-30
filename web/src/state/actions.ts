@@ -761,6 +761,8 @@ export async function compile(opts: { clean?: boolean; reason?: 'manual' | 'auto
       ...(backend !== 'browser' ? { console: result.transcript } : {}),
     });
     applyMarkers();
+    // a compile the user asked for shows where they are writing in the new PDF
+    if (opts.reason === 'manual' && pdf && synctex) followCursor(synctex);
     if (result.fetched.length) {
       const labels = new Map((getState().engine.info?.collections ?? []).map((c) => [c.id, c.label.replace(/\s*\(.*\)$/, '')]));
       const names = result.fetched.map((f) => labels.get(f) ?? f.replace(/^font:/, ''));
@@ -826,10 +828,19 @@ export function forwardSearch(line?: number) {
     toast({ kind: 'info', title: 'Compile first', message: 'SyncTeX data is created with each compile.' });
     return;
   }
-  line ??= e.getPosition()?.lineNumber ?? 1;
+  line ??= editorBridge.cursorLine() ?? 1;
   const rects = synctex.forward(path, line);
   if (!rects.length) toast({ kind: 'info', title: 'No PDF location for this line' });
   else setState({ pdfTarget: { rects, nonce: Date.now() } });
+}
+
+/** Scroll the PDF to the cursor's position, quietly (nothing happens when it has none). */
+function followCursor(synctex: SyncTex) {
+  const path = getState().activePath;
+  const line = path ? editorBridge.cursorLine() : null;
+  if (!path || !line) return;
+  const rects = synctex.forward(path, line);
+  if (rects.length) setState({ pdfTarget: { rects, nonce: Date.now() } });
 }
 
 export function inverseSearch(page: number, x: number, y: number) {

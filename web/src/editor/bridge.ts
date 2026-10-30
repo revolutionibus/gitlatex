@@ -7,6 +7,8 @@ import type { monaco } from './monaco';
 type Editor = monaco.editor.IStandaloneCodeEditor;
 
 let editor: Editor | null = null;
+/** The cursor's line in the active file when another editor (the LyX-style one) has it. */
+let cursorLine: (() => number) | null = null;
 /** Range of the "/query" text that opened the slash menu (replaced on insert). */
 let pendingSlashRange: monaco.IRange | null = null;
 
@@ -16,6 +18,14 @@ export const editorBridge = {
   },
   get(): Editor | null {
     return editor;
+  },
+  /** Let a non-Monaco editor report the cursor's line (null to hand it back to Monaco). */
+  setCursorLine(fn: (() => number) | null) {
+    cursorLine = fn;
+  },
+  /** The line of the active file the cursor is on, whichever editor shows it. */
+  cursorLine(): number | null {
+    return cursorLine ? cursorLine() : (editor?.getPosition()?.lineNumber ?? null);
   },
   setSlashRange(r: monaco.IRange | null) {
     pendingSlashRange = r;
