@@ -378,10 +378,11 @@ Edit one project together with a few co-authors in real time (Overleaf-style
 shared cursors), while everyone keeps their own folder and their own Git.
 
 - **Off by default, per project.** Click the **people** icon in the side panel
-  (above Compiler), or *Live collaboration…* in the command palette, and enter
-  the server, a room name and the token. Your cursor shows your GitHub username,
-  and the top bar shows the initials of everyone editing. Only that project is shared; it reconnects
-  whenever you open it again, until you choose **Stop sharing**.
+  (above Compiler), or *Live collaboration…* in the command palette. Co-authors
+  choose **Join** and paste the one-line invite the owner sent
+  them; that's all. Your cursor shows your GitHub username, and the top bar
+  shows the initials of everyone editing. Only that project is shared; it
+  reconnects whenever you open it again, until you choose **Stop sharing**.
 - **Only the text is relayed.** Each person's GitLaTeX writes the shared text to
   their own disk, and compiles, commits and pushes from there as usual. Binary
   files (images, PDFs) are not shared — commit and pull those.
@@ -389,10 +390,11 @@ shared cursors), while everyone keeps their own folder and their own Git.
   differ from the room are replaced by the room's version, and files only you
   have are added to it — commit first if you want to keep yours. A pull by one
   person reaches everyone, so let one person pull during a session.
-- **You need a relay**: a small Cloudflare Worker in
-  [collab-worker/](collab-worker/README.md), deployable on Cloudflare's free plan
-  in a few minutes. Anyone with its token can join any room, so share the token
-  only with your co-authors.
+- **The owner runs a relay**: [gitlatex-collab](https://github.com/abdussamiakanda/gitlatex-collab),
+  a small Cloudflare Worker deployed from the browser on the free plan. Under
+  **Host**, the owner signs in with the relay's admin token and creates a room
+  per project; each room gets its own token, packed into the invite, so an
+  invite opens only that project and co-authors never see the admin token.
 
   See [docs/live-collaboration.md](docs/live-collaboration.md) for setup, how it
   behaves, the API and how it is built.

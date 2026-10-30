@@ -90,7 +90,7 @@ class Session {
         toast({
           kind: 'warning',
           title: 'Cannot reach the collaboration server',
-          message: `Check the server address and token for room “${config.room}”. Still retrying; your edits are kept locally.`,
+          message: `If the room's token changed or the room was deleted, ask its owner for a new invite. Still retrying room “${config.room}”; your edits are kept locally.`,
           timeout: 0,
         });
       }

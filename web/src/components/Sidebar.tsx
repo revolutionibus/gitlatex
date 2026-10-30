@@ -6,6 +6,7 @@ import { GitPanel } from './GitPanel';
 import { ReviewPanel } from './ReviewPanel';
 import { HistoryPanel } from './HistoryPanel';
 import { EnginePanel } from './EnginePanel';
+import { CollabPanel } from './CollabPanel';
 import { clsx } from './ui';
 import { closeProject, newProjectDialog } from '../state/actions';
 
@@ -52,7 +53,13 @@ export function ActivityBar() {
       {VIEWS.map((v) => [
         // Live collaboration sits just above the compiler; a dot (or the number of peers) shows the project is shared.
         v.id === 'engine' && project
-          ? btn(false, collab ? `Live collaboration: room ${collab.room} (${collab.status})` : 'Live collaboration', <Users className="size-[18px]" />, () => openDialog({ type: 'collab' }), collab ? collab.peers.length || -1 : 0)
+          ? btn(
+              sidebar === 'collab',
+              collab ? `Live collaboration: room ${collab.room} (${collab.status})` : 'Live collaboration',
+              <Users className="size-[18px]" />,
+              () => setState({ sidebar: sidebar === 'collab' ? null : 'collab' }),
+              collab ? collab.peers.length || -1 : 0,
+            )
           : null,
         btn(sidebar === v.id, v.label, v.icon, () => setState({ sidebar: sidebar === v.id ? null : v.id }), v.id === 'review' ? reviewCount : v.id === 'git' ? scmCount : 0),
       ])}
@@ -73,6 +80,7 @@ export function Sidebar() {
       {sidebar === 'review' && <ReviewPanel />}
       {sidebar === 'git' && <GitPanel />}
       {sidebar === 'history' && <HistoryPanel />}
+      {sidebar === 'collab' && <CollabPanel />}
       {sidebar === 'engine' && <EnginePanel />}
     </aside>
   );

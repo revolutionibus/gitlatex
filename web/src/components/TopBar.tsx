@@ -202,7 +202,7 @@ function CollabButton({ collab }: { collab: CollabState | null }) {
   const dot = collab.status === 'connected' ? 'bg-ok' : collab.status === 'connecting' ? 'bg-warn' : 'bg-danger';
   return (
     <button
-      onClick={() => openDialog({ type: 'collab' })}
+      onClick={() => setState({ sidebar: 'collab' })}
       title={`Live: ${collab.room} (${collab.status}) — ${people.map((p, i) => (i === 0 ? `${p.name} (you)` : p.name)).join(', ')}`}
       aria-label="Live collaboration"
       className="focus-ring relative flex h-8 items-center rounded-md px-1 hover:bg-hover"

@@ -19,7 +19,6 @@ import { WizardDialog } from './Wizards';
 import { EditorFeatureSettings } from './EditorSettings';
 import { AboutSettings } from './AboutSettings';
 import { PublishDialog } from './PublishDialog';
-import { CollabDialog } from './CollabDialog';
 import { Button, Kbd, Modal, TextInput, Toggle, clsx } from './ui';
 import { FileIcon } from './FileIcon';
 
@@ -49,8 +48,6 @@ function DialogSwitch({ dialog }: { dialog: Dialog }) {
       return <DiffDialog d={dialog} />;
     case 'publish':
       return <PublishDialog />;
-    case 'collab':
-      return <CollabDialog />;
   }
 }
 
@@ -414,7 +411,7 @@ function CommandPalette() {
       cmd('commit', 'Git: Commit…', <GitCommitHorizontal className="size-4" />, () => setState({ sidebar: 'git' })),
       cmd('branch', 'Git: Create branch…', <GitBranch className="size-4" />, promptCreateBranch),
       cmd('publish', 'Git: Publish repository…', <CloudUpload className="size-4" />, openPublishDialog),
-      cmd('collab', 'Live collaboration…', <Users className="size-4" />, () => openDialog({ type: 'collab' })),
+      cmd('collab', 'Live collaboration…', <Users className="size-4" />, () => setState({ sidebar: 'collab' })),
       cmd('clone', 'Clone a Git repository…', <GitBranch className="size-4" />, promptClone),
       cmd('home', 'All projects', <Home className="size-4" />, () => void closeProject()),
       cmd('auto', 'Toggle auto-compile', <Zap className="size-4" />, () => updateSettings({ autoCompile: !useStore.getState().settings.autoCompile })),

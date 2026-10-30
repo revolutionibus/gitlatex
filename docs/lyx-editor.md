@@ -108,7 +108,12 @@ document clean. LaTeX handles spacing, so:
   paragraph. The status bar tells you why. Use
   <kbd>Ctrl</kbd>+<kbd>Space</kbd> for a protected (non-breaking) space.
 - **Tab does not indent.** Indentation comes from the layout and from the
-  depth (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>→</kbd>).
+  depth (<kbd>Alt</kbd>+<kbd>Shift</kbd>+<kbd>→</kbd>). In a paragraph with a
+  label, <kbd>Tab</kbd> renames the label in place; in a heading or theorem
+  without one, it adds one (see [Insets](#insets)).
+- **Changing the layout keeps you typing.** After choosing Chapter, Section…
+  from the layout box, a menu or a shortcut, the cursor is in that paragraph,
+  at the end of its text.
 - **A line break inside a paragraph** is <kbd>Ctrl</kbd>+<kbd>Enter</kbd>
   (LaTeX's `\\`).
 - **Quotes become typographic quotes:** typing `"` gives “ or ” depending on
@@ -186,8 +191,12 @@ Typing inside a formula:
   text.
 - In a display formula, **Enter** continues with text below it.
 - <kbd>Alt</kbd>+<kbd>M</kbd> <kbd>N</kbd> numbers (or un-numbers) a display
-  formula. **Insert → Label…** inside a display formula gives it a label,
-  shown under the number.
+  formula. To label it, press <kbd>Tab</kbd> once nothing in the formula is
+  left to fill in, or choose **Insert → Label…** (or *Insert label* in the
+  command palette) while in it: you type the name in place under the number,
+  starting from `eq:`, and <kbd>Enter</kbd> takes you back into the formula
+  (<kbd>Esc</kbd> cancels). The formula is numbered if it was not. Double-click
+  the label to rename it; references to it follow.
 - <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>M</kbd> inside an inline formula
   turns it into a display formula. **Edit → Math → Change Formula Type**
   converts between all the kinds.
@@ -212,7 +221,7 @@ cursor. **Edit → Dissolve Inset** removes the box and keeps its text.
 | TeX code | <kbd>Ctrl</kbd>+<kbd>L</kbd>, or the **TeX** button | written as typed |
 | URL | Insert → URL | `\url{…}` |
 | Hyperlink | Insert → Hyperlink… (double-click one to edit it) | `\href{…}{…}` |
-| Label | Insert → Label… (a name is suggested, like `sec:intro`) | `\label{…}` |
+| Label | Insert → Label…, or <kbd>Tab</kbd> in a heading or theorem. You type the name in place; a name is suggested, like `sec:intro` (`chap:`, `subsec:`… by level) with the part after the colon selected. <kbd>Enter</kbd> or <kbd>Tab</kbd> keeps it, <kbd>Esc</kbd> cancels | `\label{…}` |
 | Cross-reference | Insert → Cross-Reference… (pick a label and a format) | `\ref`, `\eqref`, `\pageref` |
 | Citation | See [Citations and Zotero](#citations-and-zotero) | `\cite{…}` |
 | Graphics, figure, table | See [Figures](#figures-graphics-and-tables) | `\includegraphics`, `figure`, `tabular` |
@@ -224,7 +233,8 @@ cursor. **Edit → Dissolve Inset** removes the box and keeps its text.
 | Child document | Insert → File → Child Document… | `\input{…}` |
 
 Double-click a **cross-reference** to jump to its label, a **label** to rename
-it (the references to it follow), a **citation** to change it, and a
+it in a dialog (or press <kbd>Tab</kbd> in its paragraph to rename it in place;
+either way the references to it follow), a **citation** to change it, and a
 **graphic** to change the file or its size.
 
 ## Citations and Zotero
@@ -359,7 +369,7 @@ then press the next key. The status bar shows what you have typed so far.
 | <kbd>F11</kbd> | Full screen |
 | <kbd>Esc</kbd> | Leave a formula or inset; cancel a selection |
 | <kbd>Alt</kbd>+letter, <kbd>F10</kbd> | Open a menu |
-| <kbd>Ctrl</kbd>+<kbd>P</kbd> | gitlatex's command palette (LyX prints with it; here print from the PDF viewer) |
+| <kbd>Ctrl</kbd>+<kbd>P</kbd> | gitlatex's command palette (LyX prints with it; here print from the PDF viewer). Its *Insert …* commands put the element at your cursor in the LyX editor, with the text to type over (a heading's "Title", a list's first item) selected; math goes into the formula you are in, or becomes an inline formula in text |
 
 ### Text style
 

@@ -26,7 +26,8 @@ import { basename, dirname, isTextPath, joinPath, normalisePath, relativePath, s
 import { KEEP } from './workspace';
 import { TEMPLATES } from '../templates';
 import { startCollab, stopCollab } from '../collab/session';
-import { moveCollabConfig, readCollabConfig, readCollabUser, writeCollabConfig, writeCollabUser, type CollabConfig, type CollabUser } from '../collab/config';
+import { moveCollabConfig, readCollabConfig, readCollabUser, sameHost, writeCollabAdmin, writeCollabConfig, writeCollabUser, type CollabAdmin, type CollabConfig, type CollabUser } from '../collab/config';
+import { deleteRoom, ensureRoom, rotateRoomToken } from '../collab/admin';
 
 // ---------------------------------------------------------------------------
 // Engine
@@ -230,11 +231,49 @@ async function rejoinCollab(project: Workspace, config: CollabConfig) {
 }
 
 /** Stop sharing the open project. Files stay as they are on disk. */
-export function leaveCollab() {
+export function leaveCollab(quiet = false) {
   if (!ws) return;
   writeCollabConfig(ws.project.id, { ...readCollabConfig(ws.project.id), enabled: false });
   stopCollab();
-  toast({ kind: 'info', title: 'Left the live session', message: 'Your files stay as they are on disk.' });
+  if (!quiet) toast({ kind: 'info', title: 'Left the live session', message: 'Your files stay as they are on disk.' });
+}
+
+/** Sign in to (or out of) a relay as its owner. Kept in this browser for every project. */
+export function setCollabAdmin(admin: CollabAdmin | null) {
+  writeCollabAdmin(admin);
+  setState({ collabAdmin: admin });
+}
+
+/** Whether the open project is shared in this room of this relay. */
+function sharesRoom(admin: CollabAdmin, room: string) {
+  if (!ws) return false;
+  const c = readCollabConfig(ws.project.id);
+  return c.enabled && c.room === room && sameHost(c.host, admin.host);
+}
+
+/** Owner: create the project's room (or reuse it, keeping its token) and go live in it. */
+export async function hostCollab(admin: CollabAdmin, room: string, user: CollabUser) {
+  const rec = await ensureRoom(admin, room);
+  setCollabAdmin(admin);
+  await joinCollab({ enabled: true, host: admin.host, room: rec.room, token: rec.token }, user);
+  return rec;
+}
+
+/** Owner: give a room a new token. Everyone in it is disconnected until they get the new invite. */
+export async function rotateCollabRoom(admin: CollabAdmin, room: string) {
+  const rec = await rotateRoomToken(admin, room);
+  if (ws && sharesRoom(admin, room)) {
+    const config = { ...readCollabConfig(ws.project.id), token: rec.token };
+    writeCollabConfig(ws.project.id, config);
+    startCollab(ws, config, readCollabUser());
+  }
+  return rec;
+}
+
+/** Owner: delete a room and its shared text from the relay. Everyone's files stay on disk. */
+export async function deleteCollabRoom(admin: CollabAdmin, room: string) {
+  await deleteRoom(admin, room);
+  if (sharesRoom(admin, room)) leaveCollab(true);
 }
 
 // ---------------------------------------------------------------------------

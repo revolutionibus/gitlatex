@@ -60,6 +60,13 @@ export interface LyxEditor {
   caretPosition(): { line: number; column: number };
   /** Move to the paragraph that contains a line of the file. */
   reveal(line: number, column?: number): void;
+  /**
+   * Insert LaTeX at the caret, as the app's command palette and wizards do in the
+   * source editor. Paragraph-level LaTeX (a heading, a list, an equation) becomes
+   * paragraphs beside the caret's; anything else goes inline. `select` is text to
+   * select afterwards, ready to type over (e.g. a heading's "Title").
+   */
+  insertTex(tex: string, select?: string): boolean;
   focus(): void;
   destroy(): void;
 }
@@ -196,6 +203,8 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
   };
   let prefs = { dollarMath: true, backslashTex: false, zoom: 100 };
   let savedRange = null, curBlock = null, pendingMath = null;
+  /** The formula last edited, while nothing else in the editor has been since (the app's command palette takes the focus from it). */
+  let lastMath = null;
   let loading = false, dirty = false;
   const bookmarks = {};
   let lastPos = null;
@@ -314,15 +323,28 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     if (after) setCaret(t, t.data.startsWith(ZW) ? 1 : 0);
     else setCaret(t, t.data.length);
   }
+  /** Bumped by every click, so a formula's pending focus does not override where the user clicked. */
+  let clicks = 0;
+  /**
+   * Focus a formula. MathLive's focus() does nothing while it still believes it has the
+   * focus (after the focus moved to, say, a label field beside it), so its keyboard sink
+   * is focused directly when needed.
+   */
+  function focusField(mf) {
+    mf.focus({ preventScroll: true });
+    if (document.activeElement !== mf) mf.shadowRoot?.querySelector('.ML__keyboard-sink')?.focus({ preventScroll: true });
+  }
   function focusMath(mf, where) {
     if (!mf) return;
     pendingMath = mf;
+    const at = clicks;
     customElements.whenDefined('math-field').then(() => requestAnimationFrame(() => {
-      if (!mf.isConnected) return;
-      mf.focus();
+      if (!mf.isConnected || clicks !== at) return;
+      focusField(mf);
       try {
         if (where === 'start') mf.executeCommand('moveToMathfieldStart');
         else if (where === 'end') mf.executeCommand('moveToMathfieldEnd');
+        else if (where === 'all') mf.executeCommand('selectAll');
       } catch (e) {}
     }));
   }
@@ -372,7 +394,10 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     if (!r) return { i, o: 0 };
     const pre = document.createRange(); pre.setStart(b, 0);
     try { pre.setEnd(r.startContainer, r.startOffset); } catch (e) { return { i, o: 0 }; }
-    return { i, o: pre.toString().length };
+    const o = pre.toString().length;
+    // a selection within the paragraph is kept too (e.g. the "Title" to type over when a reload follows an insert)
+    if (!r.collapsed && b.contains(r.endContainer)) { try { pre.setEnd(r.endContainer, r.endOffset); return { i, o, e: pre.toString().length }; } catch (e) { /* caret only */ } }
+    return { i, o };
   }
   function setCaretPos(p) {
     const b = ed.children[Math.min(p.i, ed.children.length - 1)];
@@ -382,14 +407,28 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     let acc = 0;
     while (w.nextNode()) {
       const n = w.currentNode, len = n.data.length;
-      const locked = n.parentElement.closest('[contenteditable=false]');
+      // inside an inset's editable body (a TeX-code box, a footnote) the caret can go in; elsewhere in an inset it cannot
+      const ce = n.parentElement.closest('[contenteditable]');
+      const locked = ce && ce.contentEditable === 'false' ? ce : null;
       if (acc + len >= p.o) {
         if (locked && locked !== b && b.contains(locked)) { const host = locked.closest('.mwrap,.sc,.lb,.inset') || locked; caretBeside(host, true); return; }
-        setCaret(n, p.o - acc); return;
+        setCaret(n, p.o - acc);
+        if (p.e > p.o) {
+          const end = textPoint(b, p.e);
+          if (end) { const r = document.createRange(); r.setStart(n, p.o - acc); r.setEnd(end[0], end[1]); setSel(r); }
+        }
+        return;
       }
       acc += len;
     }
     caretEnd(b);
+  }
+  /** The text node and offset `o` characters into paragraph `b`. */
+  function textPoint(b, o) {
+    const w = document.createTreeWalker(b, NodeFilter.SHOW_TEXT);
+    let acc = 0;
+    while (w.nextNode()) { const n = w.currentNode; if (acc + n.data.length >= o) return [n, o - acc]; acc += n.data.length; }
+    return null;
   }
   function gotoBlock(b) {
     if (!b) return;
@@ -458,6 +497,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     mf._w = 1;
     mf.addEventListener('focusin', () => {
       if (pendingMath === mf) pendingMath = null;
+      lastMath = mf;
       pushUndo('math');
       showMathbars(true);
       setCurrent(mf.closest('.blk'));
@@ -469,6 +509,14 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     }, 60));
     // an edited formula is written as MathLive serialises it; untouched ones keep their source text
     mf.addEventListener('input', () => { delete mf.dataset.tex; markDirty(); scheduleRefresh(); });
+    // Tab with no placeholder left to fill in a display formula: name its label
+    mf.addEventListener('keydown', e => {
+      if (e.key !== 'Tab' || e.shiftKey || e.ctrlKey || e.metaKey || e.altKey || !mf.classList.contains('display')) return;
+      let latex = ''; try { latex = mf.getValue('latex'); } catch (err) { /* not ready */ }
+      if (/\\placeholder/.test(latex)) return;
+      e.preventDefault(); e.stopPropagation();
+      editEqLabelInline(mf.closest('.blk'));
+    }, true);
     mf.addEventListener('move-out', e => {
       e.preventDefault();
       const d = e.detail && e.detail.direction;
@@ -685,7 +733,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
         if (THM[ctx] === 'plain') b.classList.add('in-plain');
         const no = b.querySelector('.eqno'), lb = b.querySelector('.eqlabel');
         if (b.dataset.numbered) { eq++; if (no) no.textContent = '(' + eq + ')'; } else if (no) no.textContent = '';
-        if (lb) lb.textContent = b.dataset.label ? b.dataset.label : '';
+        if (lb && !lb.classList.contains('editing')) { lb.textContent = b.dataset.label ? b.dataset.label : ''; lb.title = b.dataset.label ? 'Label (Tab at the end of the formula, or double-click, to rename)' : ''; }
         if (b.dataset.label) labelNum[b.dataset.label] = b.dataset.numbered ? String(eq) : '';
         b.dataset.num = b.dataset.numbered ? String(eq) : '';
         prev = b; continue;
@@ -745,7 +793,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     });
     $$('.inset[data-inset="Caption"]', ed).forEach(c => { if (!c.closest('.inset[data-inset="Float"]')) c.querySelector(':scope > .ilabel').textContent = 'Caption:'; });
     $$('.inset[data-inset="Foot"] > .ilabel', ed).forEach(l => { l.textContent = 'foot ' + (++foot); });
-    $$('.atom[data-inset="Label"]', ed).forEach(l => { l.textContent = l.dataset.name; l.title = 'Label: ' + l.dataset.name; });
+    $$('.atom[data-inset="Label"]:not(.editing)', ed).forEach(l => { l.textContent = l.dataset.name; l.title = 'Label: ' + l.dataset.name + ' (Tab or double-click to rename)'; });
     $$('.atom[data-inset="Ref"]', ed).forEach(r => {
       const v = labelNum[r.dataset.name];
       const shown = v == null || v === '' ? '??' : v;
@@ -950,7 +998,14 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     }
     if (e.key === 'Tab' && plain) {
       e.preventDefault();
-      const td = currentCell(); if (!td) return;
+      const td = currentCell();
+      if (!td) {
+        if (e.shiftKey || ib) return;
+        const l = labelForTab();
+        if (l) editLabelInline(l, false);
+        else if (suggestLabel()) insertLabelInline();
+        return;
+      }
       const tab = td.closest('.inset[data-inset="Tabular"]'), cells = cellBodies(tab), k = cells.indexOf(cellBody(td)) + (e.shiftKey ? -1 : 1);
       if (k >= 0 && k < cells.length) enterAtom({ cell: cells[k] }, true);
       else if (!e.shiftKey) tableCmd('append-row', rowsOf(tab).pop().cells[0]);
@@ -1028,6 +1083,8 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     if (l) { e.preventDefault(); const ins = l.parentElement; ins.classList.toggle('collapsed'); if (ins.classList.contains('collapsed')) caretBeside(ins, true); markDirty(); }
   });
   ed.addEventListener('dblclick', e => {
+    const el = e.target.closest && e.target.closest('.blk[data-type="_display"] .eqlabel');
+    if (el) { e.preventDefault(); editEqLabelInline(el.closest('.blk')); return; }
     const a = e.target.closest && e.target.closest('.atom');
     if (!a) return;
     e.preventDefault();
@@ -1282,7 +1339,109 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     pushUndo();
     bs.forEach(b => { b.dataset.type = name; delete b.dataset.cont; if (headLevel(name) != null || FRONT[name]) delete b.dataset.depth; });
     refresh(); updateCombo();
-    if (!activeMath()) { const s = selRange(true); if (!s) caretEnd(bs[0]); }
+    if (!activeMath()) focusIn(bs[0]);
+  }
+  /**
+   * Put the keyboard back in the editor with the caret in `b`, ready to type: where it
+   * was if it is already in `b`, else at the end of its text. Needed after the layout
+   * box or a menu took focus (choosing Chapter there used to leave typing nowhere).
+   */
+  function focusIn(b) {
+    const s = getSelection();
+    const r = s.rangeCount && b.contains(s.getRangeAt(0).startContainer) ? s.getRangeAt(0).cloneRange()
+      : savedRange && b.contains(savedRange.startContainer) ? savedRange.cloneRange() : null;
+    if (!r) { caretEndText(b); return; }
+    if (document.activeElement !== ed) ed.focus({ preventScroll: true });
+    setSel(r);
+  }
+  function insertTex(src, select) {
+    // the palette took the focus from a formula: the insert goes there
+    const am = activeMath() || (lastMath && lastMath.isConnected && !root.contains(document.activeElement) ? lastMath : null);
+    if (am && /^\s*\\label\{[^{}]*\}\s*$/.test(src)) {
+      if (am.classList.contains('display')) { editEqLabelInline(am.closest('.blk')); return true; }
+      status('An inline formula cannot have a label; use a display formula'); return false;
+    }
+    if (am) {
+      // in a formula: math goes in at its cursor; anything else does not belong there
+      if (/^\s*(\\begin\{document\}|\\(begin\{(?!(cases|matrix|pmatrix|bmatrix|aligned)\})|section|chapter|title|item)\b)/.test(src)) { status('Command disabled in math'); return false; }
+      pushUndo(); am.focus(); am.insert(src.trim().replace(/^\$|\$$/g, ''), { selectionMode: 'placeholder', format: 'latex' }); markDirty(); return true;
+    }
+    // math-only commands typed in text become inline math
+    if (/^\s*\\(frac|dfrac|tfrac|int|iint|iiint|oint|sum|prod|lim|sqrt)(?![A-Za-z])/.test(src)) src = '$' + src.trim() + '$';
+    // an environment, or anything that ends a line, is a paragraph of its own (not spliced into this one)
+    const blockish = /^\s*\\begin\s*\{/.test(src) || /\n\s*$/.test(src);
+    const r = selRange(true); const b = currentBlock();
+    if (!r || !b) return false;
+    // a bare label is named in place, as Insert ▸ Label does
+    const lab = /^\s*\\label\{([^{}]*)\}\s*$/.exec(src);
+    if (lab && isText(b)) { insertLabelInline(lab[1]); return true; }
+    let made = parseTex(src).blocks;
+    if (!made.length) {
+      // an empty centred (or flush) block: an empty paragraph with that alignment, to type into
+      const al = /\\begin\{(center|flushleft|flushright)\}/.exec(src);
+      if (!al) return false;
+      const nb = mkBlock('Standard'); nb.dataset.align = { center: 'center', flushleft: 'left', flushright: 'right' }[al[1]];
+      made = [nb];
+    }
+    // fresh content: not tied to any chunk of the file's source
+    made.forEach(m => { delete m.dataset.chunk; $$('[data-chunk]', m).forEach(n => delete n.dataset.chunk); });
+    pushUndo();
+    let scope, first;
+    const at = [...ed.children].indexOf(b);
+    if (made.length === 1 && made[0].dataset.type === 'Standard' && isText(b) && !blockish) {
+      if (!r.collapsed) r.deleteContents();
+      const nodes = [...made[0].childNodes].filter(n => n.nodeName !== 'BR');
+      const frag = document.createDocumentFragment(); nodes.forEach(n => frag.append(n));
+      r.insertNode(frag); removeLoneBr(b);
+      scope = nodes;
+    } else {
+      if (isText(b) && isEmptyBlock(b)) b.replaceWith(...made);
+      else if (isText(b) && !textBefore(b, r).text && !textBefore(b, r).atom) b.before(...made);
+      else b.after(...made);
+      scope = made; first = made[0];
+    }
+    $$('math-field', ed).forEach(applyMacros);
+    markDirty(); refresh();
+    // refresh may rebuild what was inserted: look again in the live document
+    if (!scope.some(n => n.isConnected)) scope = first ? [...ed.children].slice(Math.max(0, at - 1), at + made.length + 1) : [b];
+    if (first && !first.isConnected) first = scope.find(n => n.isConnected && n !== b) || scope[0];
+    if (select && selectIn(scope, select)) return true;
+    // the text to type over is a formula: select its contents
+    const mf = scope.map(n => n.nodeType === 1 ? (n.matches('math-field') ? n : n.querySelector('math-field')) : null).find(Boolean);
+    if (mf) {
+      // point the caret at a new display formula first, so a reload (e.g. a package being added) comes back to it
+      const host = mf.closest('.blk');
+      if (host && host.dataset.type === '_display') setCaret(host, 0);
+      focusMath(mf, select ? 'all' : 'end'); return true;
+    }
+    if (first) { if (first.dataset.type === '_display') focusMath(first.querySelector('math-field'), 'end'); else if (isText(first)) caretEndText(first); else caretStart(first); }
+    else { const last = scope[scope.length - 1]; if (last.nodeType === 3) setCaret(last, last.data.length); else caretBeside(last, true); }
+    return true;
+  }
+  /** Select the first occurrence of `text` in these nodes (text outside insets only). */
+  function selectIn(nodes, text) {
+    for (const n of nodes) {
+      const texts = n.nodeType === 3 ? [n] : [];
+      if (n.nodeType === 1) { const w = document.createTreeWalker(n, NodeFilter.SHOW_TEXT); while (w.nextNode()) if (!w.currentNode.parentElement.closest('.atom,.mwrap,.ilabel,math-field')) texts.push(w.currentNode); }
+      // a whole word, so "text" in \textcolor{red}{text} is the argument, not the command
+      const word = new RegExp('(?<![A-Za-z\\\\])' + text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(?![A-Za-z])');
+      for (const t of texts) {
+        const m = word.exec(t.data); const i = m ? m.index : -1; if (i < 0) continue;
+        if (document.activeElement !== ed) ed.focus({ preventScroll: true });
+        const r = document.createRange(); r.setStart(t, i); r.setEnd(t, i + text.length); setSel(r);
+        return true;
+      }
+    }
+    return false;
+  }
+  /** The caret at the end of the paragraph's text, before any labels that end it. */
+  function caretEndText(b) {
+    let last = b.lastChild;
+    const skip = n => n && (n.nodeName === 'BR' || (n.nodeType === 3 && n.data.replace(/\u200B/g, '') === '') || (n.nodeType === 1 && n.dataset.inset === 'Label'));
+    while (skip(last)) last = last.previousSibling;
+    if (!last) { const l = b.querySelector(':scope > .atom[data-inset="Label"]'); if (l) caretBeside(l, false); else caretEnd(b); return; }
+    if (last.nodeType === 3) setCaret(last, last.data.length);
+    else caretBeside(last, true);
   }
   function depthChange(delta) {
     const bs = selectedBlocks();
@@ -1480,7 +1639,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     const t = b.dataset.type;
     const slug = s => s.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 24);
     if (t === '_display') return 'eq:';
-    if (headLevel(t) != null) return (headLevel(t) === 0 ? 'part:' : headLevel(t) === 1 ? 'sec:' : 'subsec:') + slug(plainText(b));
+    if (headLevel(t) != null) return ['part:', 'chap:', 'sec:', 'subsec:', 'subsubsec:', 'par:', 'subpar:'][headLevel(t)] + slug(plainText(b));
     if (THM[t]) return ({ Theorem: 'thm:', Lemma: 'lem:', Corollary: 'cor:', Proposition: 'prop:', Definition: 'def:', Example: 'exa:', Remark: 'rem:' })[t] || 'thm:';
     if (t === 'Enumerate') return 'enu:';
     return '';
@@ -1488,11 +1647,14 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
   async function labelInsert() {
     const am = activeMath();
     const b = currentBlock();
+    // The label is typed in place: in text, and beside a display formula's number.
+    if (!am && b && isText(b)) { insertLabelInline(); return; }
+    if (am && am.classList.contains('display')) { editEqLabelInline(am.closest('.blk')); return; }
     const name = await promptDialog('Label', 'Label:', suggestLabel());
     if (!name) return;
     if (allLabels().some(l => l.name === name)) { status(`The label "${name}" already exists.`); }
     if (am && am.classList.contains('display')) {
-      pushUndo(); const db = am.closest('.blk'); db.dataset.label = name; db.dataset.numbered = '1'; refresh(); focusMath(am, 'end'); return;
+      pushUndo(); const db = am.closest('.blk'); renameEqLabel(db, name); db.dataset.numbered = '1'; refresh(); focusMath(am, 'end'); return;
     }
     if (am) { status('Command disabled'); return; }
     if (!b || !isText(b)) return;
@@ -1500,10 +1662,110 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
   }
   async function editLabelAtom(a) {
     const name = await promptDialog('Label', 'Label:', a.dataset.name);
+    renameLabel(a, name);
+  }
+  /** Rename a label and the references to it. */
+  function renameLabel(a, name) {
     if (!name || name === a.dataset.name) return;
+    if (allLabels().some(l => l.el !== a && l.name === name)) status(`The label "${name}" already exists.`);
     pushUndo();
     $$(`.atom[data-inset="Ref"]`, ed).filter(r => r.dataset.name === a.dataset.name).forEach(r => { r.dataset.name = name; });
     a.dataset.name = name; refresh();
+  }
+  /** Give a display formula a label (or a new name), and point the references to the old name at the new one. */
+  function renameEqLabel(db, name) {
+    const old = db.dataset.label;
+    if (allLabels().some(l => l.el !== db && l.name === name)) status(`The label "${name}" already exists.`);
+    if (old && old !== name) $$(`.atom[data-inset="Ref"]`, ed).filter(r => r.dataset.name === old).forEach(r => { r.dataset.name = name; });
+    db.dataset.label = name;
+  }
+  /**
+   * Name a display formula's label in place, beside its number (a new label numbers the
+   * formula). Enter or Tab keeps it, Escape cancels; either goes back into the formula.
+   */
+  function editEqLabelInline(db) {
+    const lb = db && db.querySelector('.eqlabel'); const mf = db && db.querySelector('math-field');
+    if (!lb || lb.classList.contains('editing')) return;
+    const old = db.dataset.label || '';
+    const start = old || 'eq:';
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'label-edit'; inp.value = start; inp.spellcheck = false;
+    inp.setAttribute('aria-label', 'Equation label');
+    inp.size = Math.max(10, start.length + 2);
+    lb.classList.add('editing'); lb.textContent = ''; lb.append(inp);
+    let done = false;
+    const finish = (keep, away = false) => {
+      if (done) return; done = true;
+      const name = inp.value.trim().replace(/[{}\\]/g, '');
+      lb.classList.remove('editing'); inp.remove();
+      if (keep && name && name !== old && name !== 'eq:') { pushUndo(); renameEqLabel(db, name); db.dataset.numbered = '1'; markDirty(); }
+      refresh();
+      // straight back into the formula, so typing goes on there
+      if (!away && mf) { focusField(mf); try { mf.executeCommand('moveToMathfieldEnd'); } catch (e) { /* not ready */ } }
+    };
+    inp.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    ['beforeinput', 'input', 'keyup', 'mousedown', 'click', 'dblclick'].forEach(t => inp.addEventListener(t, e => e.stopPropagation()));
+    inp.addEventListener('input', () => { inp.size = Math.max(10, inp.value.length + 2); });
+    inp.addEventListener('blur', () => finish(true, true));
+    pendingMath = null;
+    inp.focus();
+    if (old) inp.select(); else inp.setSelectionRange(start.length, start.length);
+  }
+  /** A new label at the caret, named in place (the suggested name is selected, ready to type over). */
+  function insertLabelInline(name) {
+    const b = currentBlock(); if (!b || !isText(b)) { status('Command disabled'); return; }
+    const a = mkAtom('Label', { name: suggestLabel() || name || 'lbl:' });
+    insertNodeAtCaret(a);
+    editLabelInline(a, true);
+  }
+  /**
+   * Edit a label's name right where it is. Enter, Tab or clicking away keeps the
+   * name; Escape cancels (and removes a label that was just inserted). The caret
+   * then goes back to the text just after the label.
+   */
+  function editLabelInline(a, isNew) {
+    if (a.classList.contains('editing')) return;
+    const old = a.dataset.name || '';
+    const inp = document.createElement('input');
+    inp.type = 'text'; inp.className = 'label-edit'; inp.value = old; inp.spellcheck = false;
+    inp.setAttribute('aria-label', 'Label name');
+    inp.size = Math.max(8, old.length + 2);
+    a.classList.add('editing'); a.textContent = ''; a.append(inp);
+    let done = false;
+    // `away`: focus went elsewhere (a click), so the caret is left where that put it
+    const finish = (keep, away = false) => {
+      if (done) return; done = true;
+      const name = inp.value.trim();
+      a.classList.remove('editing'); inp.remove();
+      if (isNew && (!keep || !name)) { const t = a.nextSibling; a.remove(); if (!away && t && t.nodeType === 3) setCaret(t, 0); refresh(); markDirty(); return; }
+      if (keep && name && name !== old) { renameLabel(a, name); markDirty(); }
+      else refresh();
+      if (!away) caretBeside(a, true);
+    };
+    const stop = e => e.stopPropagation();
+    inp.addEventListener('keydown', e => {
+      e.stopPropagation();
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); finish(true); }
+      else if (e.key === 'Escape') { e.preventDefault(); finish(false); }
+    });
+    ['beforeinput', 'input', 'keyup', 'mousedown', 'click', 'dblclick'].forEach(t => inp.addEventListener(t, stop));
+    inp.addEventListener('input', () => { inp.size = Math.max(8, inp.value.length + 2); });
+    inp.addEventListener('blur', () => finish(true, true));
+    inp.focus();
+    // a fresh "sec:intro" selects "intro"; an existing name is selected whole
+    const colon = old.indexOf(':');
+    if (isNew && colon >= 0) inp.setSelectionRange(colon + 1, old.length); else inp.select();
+  }
+  /** The label for Tab to edit: the one beside the caret, or else the paragraph's own. */
+  function labelForTab() {
+    const near = adjacentAtomAny();
+    if (near && near.dataset.inset === 'Label') return near;
+    const b = currentBlock();
+    return b && isText(b) ? b.querySelector(':scope > .atom[data-inset="Label"]') : null;
   }
   async function refInsert() {
     const labels = allLabels();
@@ -1769,6 +2031,8 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     const pos = keepView ? caretPos() : null;
     const scroll = workarea.scrollTop;
     const hadFocus = root.contains(document.activeElement);
+    // a formula about to get the focus (just inserted) gets it again after the reload
+    const pendingAt = keepView && pendingMath && pendingMath.isConnected ? [...ed.children].indexOf(pendingMath.closest('.blk')) : -1;
     loading = true;
     try {
       const doc = parseTex(text);
@@ -1790,7 +2054,9 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
       loading = false;
     }
     workarea.scrollTop = keepView ? scroll : 0;
-    if (pos && hadFocus) setCaretPos(pos);
+    const pendingMf = pendingAt >= 0 ? ed.children[pendingAt]?.querySelector('math-field') : null;
+    if (pendingMf) focusMath(pendingMf, 'start');
+    else if (pos && hadFocus) setCaretPos(pos);
     updateCombo();
     updateSource(true);
   }
@@ -2876,6 +3142,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     return { m: { C: ev.C ? 1 : 0, M: ev.M ? 1 : 0, S: ev.S && k.length > 1 ? 1 : 0 }, key: k };
   }
   listen(root, 'keydown', onKeyDown, true);
+  listen(document, 'mousedown', () => { clicks++; }, true);
   listen(root, 'keyup', e => { if (e.key === 'Alt') root.classList.remove('show-mn'); });
   listen(window, 'blur', () => root.classList.remove('show-mn'));
 
@@ -3406,7 +3673,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     if (!ed.contains(r.startContainer)) return;
     savedRange = r.cloneRange();
     if (document.activeElement && document.activeElement.tagName === 'MATH-FIELD') return;
-    pendingMath = null;
+    pendingMath = null; lastMath = null;
     setCurrent(currentBlock());
     updateCombo();
   });
@@ -3416,6 +3683,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     getText: getLatex,
     caretPosition,
     reveal: revealPosition,
+    insertTex,
     focus() { if (!selRange(true)) caretStart(ed.firstElementChild); },
     destroy() {
       cleanups.forEach(f => f());

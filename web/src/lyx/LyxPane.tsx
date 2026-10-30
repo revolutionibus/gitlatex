@@ -262,6 +262,7 @@ export function LyxPane({ path }: { path: string }) {
         });
         setState('ready');
         editorBridge.setCursorLine(() => ed?.caretPosition().line ?? 1);
+        editorBridge.setTexInserter((tex, select) => ed?.insertTex(tex, select) ?? false);
         // coming from the source editor: start where its cursor was
         const mon = editorBridge.get();
         const at = mon?.getModel() === model ? mon.getPosition() : null;
@@ -281,7 +282,10 @@ export function LyxPane({ path }: { path: string }) {
       disposed = true;
       if (timer) write();
       sub?.dispose();
-      if (ed) editorBridge.setCursorLine(null);
+      if (ed) {
+        editorBridge.setCursorLine(null);
+        editorBridge.setTexInserter(null);
+      }
       ed?.destroy();
       editorRef.current = null;
       for (const u of urls.values()) void Promise.resolve(u).then((x) => x && URL.revokeObjectURL(x));

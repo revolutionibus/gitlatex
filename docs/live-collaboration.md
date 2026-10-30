@@ -21,53 +21,95 @@ locally, exactly as before.
 
 ## Setting it up
 
-### 1. Deploy the relay (once, by one person)
+There are two roles:
 
-You need a Cloudflare account (the free plan is enough) and Node.js 22+.
+- **The owner** deploys the relay once and picks an **admin token** that only
+  they know. For each project they want to share, they create a **room**; the
+  relay generates that room's own token, and the owner sends co-authors an
+  **invite**: one line, `gitlatex-invite:…`, holding the server, room and token.
+- **Co-authors** paste the invite into their copy of the project. They never
+  see the admin token, and an invite only opens the room it was made for.
 
-```bash
-cd collab-worker
-npm install
-npx wrangler login
-npx wrangler secret put ROOM_TOKEN      # choose a long random string
-npx wrangler deploy
-```
+Everyone's cursor is labelled with their **GitHub username**, read from the
+GitHub CLI (`gh auth login`) or `git config --global github.user`; only if
+neither is set do you type it in.
 
-`wrangler deploy` prints the server address, e.g.
-`https://gitlatex-collab.<you>.workers.dev`.
+### 1. Deploy the relay (the owner, once, in the browser)
 
-### 2. Share a project
+The relay is a small Cloudflare Worker that lives in its own repository,
+[gitlatex-collab](https://github.com/abdussamiakanda/gitlatex-collab). You
+need a Cloudflare account (the free plan is enough) and a GitHub account, but
+nothing to install and no terminal. The same steps are in GitLaTeX under
+**Live collaboration → Host**, with a button that generates the admin token.
 
-1. Open the project in GitLaTeX.
-2. Click the **people** icon in the top bar (or **Live collaboration…** in the
-   command palette, `Cmd/Ctrl+Shift+P`).
-3. Enter:
-   - **Server**: the address from step 1
-   - **Room**: any name; everyone working on this project uses the same one
-     (defaults to the project's folder name)
-   - **Token**: the `ROOM_TOKEN` you chose
-   - A colour, so others can tell whose cursor is whose. Your cursor is labelled
-     with your **GitHub username**, read from the GitHub CLI (`gh auth login`) or
-     `git config --global github.user`; only if neither is set do you type it in
-4. Click **Share live**.
+1. **Connect GitHub to Cloudflare first.** In the
+   [Cloudflare dashboard](https://dash.cloudflare.com/?to=/:account/workers-and-pages/create),
+   go to **Workers & Pages → Create application → Connect to Git**, click
+   **+ Add account**, and **Install & Authorize** the *Cloudflare Workers and
+   Pages* GitHub app.
+2. **Generate an admin token**: a long random string that only you know.
+   **Generate admin token** in GitLaTeX makes one and copies it.
+3. **Deploy:** open
+   [Deploy to Cloudflare](https://deploy.workers.cloudflare.com/?url=https://github.com/abdussamiakanda/gitlatex-collab),
+   paste the token as **ADMIN_TOKEN**, and click **Create and deploy**.
+4. **Turn on the workers.dev address.** Open **Workers & Pages**, select the
+   Worker (`gitlatex-collab`), go to **Settings → Domains & Routes**, and enable
+   **workers.dev**. The address it shows, e.g.
+   `https://gitlatex-collab.<your-subdomain>.workers.dev`, is your relay.
 
-Send the server address, room name and token to your co-authors. They do the
-same on their machine with their copy of the project, usually cloned from the
-same GitHub repository.
+To change the admin token later: the Worker's **Settings → Variables and
+Secrets**.
+
+### 2. Host a project (the owner)
+
+1. Open the project and click the **people** icon in the side panel (above
+   Compiler), or **Live collaboration…** in the command palette
+   (`Cmd/Ctrl+Shift+P`). Choose **Host**.
+2. Enter the relay address and your admin token, and click **Connect**. The
+   login is remembered in this browser for every project; **Sign out** forgets it.
+3. The room name defaults to the project's folder name. Click **Create room &
+   go live**. If the room already exists, it is reused with its token, so
+   invites you sent before still work.
+4. Copy the **invite** from the panel and send it to your co-authors.
+
+The Host tab lists every room on your relay. For each one you can copy its
+invite again, **issue a new token** (everyone in the room is disconnected and
+the old invite stops working; you stay live with the new token and the new
+invite is copied), or **delete** it (its shared text is removed from the relay;
+everyone's files stay on disk).
+
+### 3. Join (co-authors)
+
+1. Open your copy of the project, usually cloned from the same GitHub
+   repository.
+2. Click the **people** icon → **Join**, paste the invite, and
+   click **Join**.
+
+You can also type the server, room and room token by hand (**Enter the server,
+room and token by hand**).
 
 From then on the project reconnects automatically whenever it's opened. The
-top bar shows a **Live** badge with a status dot and the people in the room.
-Click it to see who is editing which file, or to **Stop sharing**.
+top bar shows the initials of everyone in the room. Click them to open the panel and see who is
+editing which file, copy the invite, or **Stop sharing**.
 
 ### Trying it locally
 
 ```bash
-cd collab-worker
-echo "ROOM_TOKEN=dev-secret" > .dev.vars
+git clone https://github.com/abdussamiakanda/gitlatex-collab.git
+cd gitlatex-collab
+npm install
+echo "ADMIN_TOKEN=dev-admin" > .dev.vars
 npx wrangler dev                         # serves on localhost:8787
 ```
 
-Use `localhost:8787` as the server in GitLaTeX.
+Use `localhost:8787` as the relay address and `dev-admin` as the admin token.
+
+### The older single-token relay (`collab-worker/`)
+
+`collab-worker/` in this repository is the earlier relay: one shared
+`ROOM_TOKEN` for every room and no admin API, so **Host** does not work with
+it. To use it anyway, join by hand with any room name and the `ROOM_TOKEN` as
+the room token.
 
 ---
 
@@ -183,13 +225,23 @@ usage notifications. Stay on the free plan if you never want a bill.
 ## The API
 
 The relay speaks the standard [Yjs](https://yjs.dev) protocols, so any Yjs
-client can join a room. All requests need `?token=<ROOM_TOKEN>`; anything else
-gets `401 Unauthorized`.
+client can join a room. Room requests need `?token=` with the room's token (or
+the admin token); anything else gets `401 Unauthorized`.
 
 | Request | What it does |
 | --- | --- |
 | `wss://<host>/parties/collab/<room>?token=…` | WebSocket for Yjs sync and awareness. |
 | `GET https://<host>/parties/collab/<room>?token=…` | JSON summary: `{ room, files: [{ path, length }], peers: [name] }`. Handy for checking a deployment. |
+| `GET /admin/rooms` | The owner's rooms: `{ rooms: [{ room, token, createdAt }] }`. |
+| `POST /admin/rooms/<room>` | Create the room with a fresh token, or return it if it exists (`created: false`). |
+| `POST /admin/rooms/<room>/token` | Issue a new token; everyone connected is disconnected. |
+| `DELETE /admin/rooms/<room>` | Delete the room and its shared text. |
+
+`/admin` requests need `Authorization: Bearer <ADMIN_TOKEN>`.
+
+**Invites** are `gitlatex-invite:` followed by base64url of
+`{"h": host, "r": room, "t": token}`. The host keeps an `http://` prefix only
+for a plain-HTTP relay such as `localhost:8787`.
 
 **Document shape:** one root map, `files`, from project-relative path to
 `Y.Text`.
@@ -218,18 +270,19 @@ provider.on('sync', (synced: boolean) => {
 
 ## How it's built
 
-### Relay: `collab-worker/`
+### Relay: [gitlatex-collab](https://github.com/abdussamiakanda/gitlatex-collab)
 
 | File | What it does |
 | --- | --- |
-| `src/index.ts` | The Worker. Checks the token, then routes each room to its own Durable Object (`Collab`, built on `y-partyserver`). The object holds the room's Yjs document, relays updates and presence, saves the document to Durable Object storage a couple of seconds after edits (in chunks, so large projects fit), and loads it again after a restart. Idle connections hibernate. |
-| `wrangler.toml` | The Worker and its SQLite-backed Durable Object class. |
+| `src/index.ts` | The Worker. Routes each room to its own Durable Object (`Collab`, built on `y-partyserver`) after checking the room's token, and serves the `/admin` API. A second Durable Object, `Registry`, holds the rooms and their tokens. `Collab` holds the room's Yjs document, relays updates and presence, saves the document a couple of seconds after edits (in chunks, so large projects fit), and loads it again after a restart. Idle connections hibernate. |
+| `wrangler.toml` | The Worker and its two SQLite-backed Durable Object classes. |
 
 ### Editor: `web/src/collab/`
 
 | File | What it does |
 | --- | --- |
-| `config.ts` | Per-project settings (on/off, server, room, token) and your GitHub username and colour, in `localStorage`. |
+| `config.ts` | Per-project settings (on/off, server, room, room token), your GitHub username and colour, and the owner's admin login, in `localStorage`. Encodes and decodes invites. |
+| `admin.ts` | The relay's owner API: list, create, re-token and delete rooms. |
 | `session.ts` | One live session for the open project. On joining, it merges the file sets and takes the room's text. After that it mirrors local changes into the room and the room's changes into the Workspace, and so onto disk. It also tracks who is online. |
 | `binding.ts` | Two-way binding between a Monaco model and a `Y.Text`. Remote edits are applied as one batch so your cursor stays put. It also draws other people's cursors and selections. |
 
@@ -237,11 +290,11 @@ Small hooks into existing code:
 
 - `editor/models.ts` (`watchModels`): tells the session when an editor model is opened or closed, so open files are bound live.
 - `state/actions.ts`:
-  - `joinCollab` and `leaveCollab`.
+  - `joinCollab` and `leaveCollab`; for the owner, `setCollabAdmin`, `hostCollab`, `rotateCollabRoom` and `deleteCollabRoom`.
   - Connects when a project opens and disconnects when it closes.
   - Moves the setting when a project is renamed and removes it when the project is deleted.
-- `state/store.ts`: `collab` state (status, room, peers) and the `collab` dialog.
-- `components/CollabDialog.tsx`, `components/TopBar.tsx` (`CollabButton`), and a command palette entry.
+- `state/store.ts`: `collab` state (status, room, peers), the owner's `collabAdmin` login, and the `collab` sidebar view.
+- `components/CollabPanel.tsx` (the sidebar panel: Join / Host, room list), `components/Sidebar.tsx`, `components/TopBar.tsx` (`CollabButton`), and a command palette entry.
 - `index.css`: styles for remote carets and their name labels.
 
 ---
@@ -249,19 +302,21 @@ Small hooks into existing code:
 ## Tests
 
 - **Unit tests:** `web/tests/unit/collab-config.test.ts` covers room names,
-  server address parsing, and per-project settings.
+  server address parsing, per-project settings, invites and admin tokens.
 - **End to end:** `web/tests/e2e/collab.mjs` runs two separate GitLaTeX servers
   with separate folders on disk through one room:
 
   ```bash
-  (cd collab-worker && echo ROOM_TOKEN=test-secret > .dev.vars && npx wrangler dev --port 8787)
+  (cd gitlatex-collab && echo ADMIN_TOKEN=test-admin > .dev.vars && npx wrangler dev --port 8787)
   gitlatex --no-browser --port 5101 --repos /tmp/gl-a
   gitlatex --no-browser --port 5102 --repos /tmp/gl-b
-  cd web && npm run e2e:collab -- http://127.0.0.1:5101 /tmp/gl-a http://127.0.0.1:5102 /tmp/gl-b localhost:8787 test-secret
+  cd web && npm run e2e:collab -- http://127.0.0.1:5101 /tmp/gl-a http://127.0.0.1:5102 /tmp/gl-b localhost:8787 test-admin
   ```
 
   It checks that:
   - projects are unshared until asked;
+  - the owner signs in, creates the room and gets an invite;
+  - a co-author joins by pasting the invite (and a non-invite is rejected);
   - the room wins on join;
   - files only one side has are merged;
   - typing reaches the other editor;
@@ -270,7 +325,9 @@ Small hooks into existing code:
   - file creation and deletion travel;
   - another project opens unshared;
   - the shared project reconnects when reopened;
-  - stopping sharing works.
+  - stopping sharing works;
+  - a new room token keeps the owner live and locks out the old invite;
+  - deleting the room stops sharing it.
 
 ---
 

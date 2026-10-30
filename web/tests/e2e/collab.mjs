@@ -1,10 +1,13 @@
 // End-to-end check of live collaboration: two GitLaTeX servers (two people,
-// two folders on disk) share one project through a local collab relay.
+// two folders on disk) share one project through a local collab relay. A hosts
+// (signs in with the relay's admin token and creates the room); B joins with the
+// invite A copies from the Live collaboration panel.
 //
-//   (cd ../collab-worker && echo ROOM_TOKEN=test-secret > .dev.vars && npx wrangler dev --port 8787)
+//   git clone https://github.com/abdussamiakanda/gitlatex-collab.git && cd gitlatex-collab && npm install
+//   echo ADMIN_TOKEN=test-admin > .dev.vars && npx wrangler dev --port 8787
 //   gitlatex --no-browser --port 5101 --repos /tmp/gl-a
 //   gitlatex --no-browser --port 5102 --repos /tmp/gl-b
-//   node tests/e2e/collab.mjs http://127.0.0.1:5101 /tmp/gl-a http://127.0.0.1:5102 /tmp/gl-b localhost:8787 test-secret
+//   node tests/e2e/collab.mjs http://127.0.0.1:5101 /tmp/gl-a http://127.0.0.1:5102 /tmp/gl-b localhost:8787 test-admin
 //
 // Each repos folder needs a project named "paper" with a main.tex; the test
 // writes them itself.
@@ -12,9 +15,9 @@ import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 
-const [baseA, dirA, baseB, dirB, relay = 'localhost:8787', token = 'test-secret'] = process.argv.slice(2);
+const [baseA, dirA, baseB, dirB, relay = 'localhost:8787', adminToken = 'test-admin'] = process.argv.slice(2);
 if (!dirB) {
-  console.error('usage: node tests/e2e/collab.mjs <url A> <repos A> <url B> <repos B> [relay host] [token]');
+  console.error('usage: node tests/e2e/collab.mjs <url A> <repos A> <url B> <repos B> [relay host] [admin token]');
   process.exit(2);
 }
 
@@ -68,15 +71,37 @@ async function person(base, name) {
   return { page, app, state, text, flush, name };
 }
 
-async function join(p) {
-  // Both people run on this machine, so give each their own GitHub username.
-  await p.page.route('**/api/scm/github-user', (r) => r.fulfill({ json: { login: p.name } }));
+const connected = (p) => until(async () => (await p.state())?.status === 'connected', `${p.name} connected`);
+
+// Both people run on this machine, so give each their own GitHub username.
+const asUser = (p) => p.page.route('**/api/scm/github-user', (r) => r.fulfill({ json: { login: p.name } }));
+
+/** The owner: sign in to the relay, create the room, go live. Returns the invite shown in the panel. */
+async function host(p) {
+  await asUser(p);
   await p.page.getByRole('button', { name: 'Live collaboration' }).click();
-  await p.page.getByLabel('Server').fill(relay);
-  await p.page.getByLabel('Room').fill(ROOM);
-  await p.page.getByLabel('Token').fill(token);
-  await p.page.getByRole('button', { name: 'Share live' }).click();
-  return until(async () => (await p.state())?.status === 'connected', `${p.name} connected`);
+  await p.page.getByRole('tab', { name: 'Host' }).click();
+  await p.page.getByLabel('Relay address').fill(relay);
+  await p.page.getByLabel('Admin token').fill(adminToken);
+  await p.page.getByRole('button', { name: 'Connect' }).click();
+  await p.page.getByLabel('Room for this project').fill(ROOM);
+  await p.page.getByRole('button', { name: 'Create room & go live' }).click();
+  const ok = await connected(p);
+  const invite = await p.page.locator('code[title^="gitlatex-invite:"]').getAttribute('title', { timeout: 5000 }).catch(() => null);
+  return { ok, invite };
+}
+
+/** A co-author: paste the invite and join. */
+async function join(p, invite) {
+  await asUser(p);
+  await p.page.getByRole('button', { name: 'Live collaboration' }).click();
+  const box = p.page.getByPlaceholder('Paste the invite');
+  await box.fill('not an invite');
+  check(await p.page.getByText('This is not a GitLaTeX invite.').isVisible(), 'a pasted non-invite is rejected');
+  await box.fill(invite);
+  check(await p.page.getByText(`Room ${ROOM} on`).isVisible(), 'the pasted invite names the room');
+  await p.page.getByRole('button', { name: 'Join', exact: true }).click();
+  return connected(p);
 }
 
 try {
@@ -84,8 +109,10 @@ try {
   const b = await person(baseB, 'Bob');
   check((await a.state()) === null && (await b.state()) === null, 'projects are not shared until asked');
 
-  check(await join(a), 'A joins the room');
-  check(await join(b), 'B joins the room');
+  const hosted = await host(a);
+  check(hosted.ok, 'A creates the room and goes live');
+  check(!!hosted.invite, 'A gets an invite to send');
+  check(await join(b, hosted.invite ?? ''), 'B joins with the invite');
 
   check(await until(async () => (await b.text('main.tex'))?.includes('From A.'), 'B gets main.tex'), 'B’s differing main.tex is replaced by the room’s');
   await b.flush();
@@ -135,10 +162,22 @@ try {
   await a.app(() => window.__GITLATEX__.actions.openProject('paper'));
   check(await until(async () => (await a.state())?.status === 'connected', 'reconnect'), 'reopening the shared project reconnects automatically');
 
-  await b.page.getByRole('button', { name: 'Live collaboration' }).click();
+  await b.page.getByRole('button', { name: 'Live collaboration', exact: true }).click();
   await b.page.getByRole('button', { name: 'Stop sharing' }).click();
   check((await b.state()) === null, 'B can stop sharing');
   check(await until(async () => !(await a.state())?.peers.length, 'Bob gone'), 'A sees Bob leave');
+
+  // A new room token: A (the owner) reconnects with it; the old invite no longer opens the room.
+  const adminLogin = { host: relay, token: adminToken };
+  const rotated = await a.app(([admin, room]) => window.__GITLATEX__.actions.rotateCollabRoom(admin, room), [adminLogin, ROOM]);
+  check(await until(async () => (await a.state())?.status === 'connected', 'A back'), 'after a new token, the owner is live again');
+  const old = (await b.page.evaluate(() => JSON.parse(localStorage.getItem('gitlatex.collab.paper') ?? '{}'))).token;
+  check(!!old && old !== rotated.token, 'the room has a new token');
+  const res = await fetch(`http://${relay}/parties/collab/${ROOM}?token=${encodeURIComponent(old)}`);
+  check(res.status === 401, 'the old invite’s token is refused');
+
+  await a.app(([admin, room]) => window.__GITLATEX__.actions.deleteCollabRoom(admin, room), [adminLogin, ROOM]);
+  check((await a.state()) === null, 'deleting the room stops sharing it');
 } catch (err) {
   console.error(err);
   failures++;

@@ -12,17 +12,17 @@ import { DEFAULT_SETTINGS, type Diagnostic, type ProjectMeta, type Settings } fr
 import type { UpdateInfo } from './updates';
 import type { ScmStatus } from '../storage/server';
 import type { CollabState } from '../collab/session';
+import { readCollabAdmin, type CollabAdmin } from '../collab/config';
 
 export type CompileStatus = 'idle' | 'running' | 'success' | 'warnings' | 'errors' | 'failed' | 'cancelled' | 'crashed';
 
-export type SidebarView = 'files' | 'outline' | 'review' | 'git' | 'history' | 'engine';
+export type SidebarView = 'files' | 'outline' | 'review' | 'git' | 'history' | 'collab' | 'engine';
 export type BottomView = 'problems' | 'log' | 'console';
 
 export type Dialog =
   | { type: 'new-project'; initialTemplate?: string }
   | { type: 'settings'; section?: 'about' }
   | { type: 'publish' }
-  | { type: 'collab' }
   | { type: 'command-palette' }
   | { type: 'shortcuts' }
   /** `source`/`query`: open the citation picker on its Zotero tab, already searching. */
@@ -89,6 +89,8 @@ export interface AppState {
   scm: ScmStatus | null;
   /** The live collaboration session of the open project (null when it is not shared). */
   collab: CollabState | null;
+  /** The relay owner's login (to create rooms and invites), when signed in in this browser. */
+  collabAdmin: CollabAdmin | null;
 }
 
 const SETTINGS_KEY = 'gitlatex.settings';
@@ -186,6 +188,7 @@ export const useStore = create<AppState>(() => ({
   update: null,
   scm: null,
   collab: null,
+  collabAdmin: readCollabAdmin(),
 }));
 
 export const getState = useStore.getState;
