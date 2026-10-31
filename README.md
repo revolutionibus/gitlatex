@@ -77,6 +77,10 @@ automatically as you type.
 - **A real code editor** — Monaco (from VS Code) with LaTeX and BibTeX
   highlighting, autocomplete for labels and citations, an outline, LaTeX-aware
   spell checking and snippets. [More](https://github.com/abdussamiakanda/gitlatex/blob/master/docs/editor.md)
+- **A LyX-style editor, if you want one** — write with headings, lists,
+  theorems, live formulas and editable tables instead of markup, with LyX's
+  keys, menus and command buffer. The file stays plain LaTeX, and only what you
+  edit is rewritten. [More](https://github.com/abdussamiakanda/gitlatex/blob/master/docs/lyx-editor.md)
 - **Compile anywhere** — with your own TeX, with TeX Live in the browser, or with
   a remote compiler, in full multi-pass builds with a clickable problems list.
   [More](https://github.com/abdussamiakanda/gitlatex/blob/master/docs/compiling.md)

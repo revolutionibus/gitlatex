@@ -17,7 +17,7 @@ import { editorBridge } from '../editor/bridge';
 import { monaco } from '../editor/monaco';
 import { parseBibtexLog, parseTexLog } from '../latex/log-parser';
 import { SyncTex } from '../latex/synctex';
-import { packageInsertion } from '../latex/analysis';
+import { inPreamble, packageInsertion } from '../latex/analysis';
 import { passOptionsFix, type QuickFix } from '../latex/explain';
 import type { SlashCommand } from '../editor/slash-commands';
 import type { CompileResult } from '../engine/protocol';
@@ -754,6 +754,7 @@ async function buildLocally(current: Workspace): Promise<Built> {
   const notices = [
     ...(res.error && !pdf ? [res.error] : []),
     ...(res.steps ?? []).filter((st) => st.missing).map((st) => `${st.tool} is not installed, so citations stay unresolved.`),
+    ...(res.steps ?? []).filter((st) => st.message).map((st) => `${st.tool} failed, so citations stay unresolved: ${st.message}`),
   ];
   return {
     status: !pdf ? 'failed' : hasErrors ? 'errors' : /LaTeX Warning|Package \w+ Warning/.test(log) ? 'warnings' : 'success',
@@ -779,7 +780,7 @@ export async function compile(opts: { clean?: boolean; reason?: 'manual' | 'auto
   if (!ws) return;
   const project = ws.project;
   const sourcePath = getState().activePath;
-  const sourceLine = editorBridge.get()?.getPosition()?.lineNumber;
+  const sourceLine = editorBridge.cursorLine() ?? undefined;
   const backend = await resolveCompiler(project.engine);
   if (ws?.project !== project) return;
   if (opts.reason === 'open' && !getState().settings.autoCompile && (backend !== 'browser' || engine.state.state !== 'ready')) return;
@@ -824,7 +825,7 @@ export async function compile(opts: { clean?: boolean; reason?: 'manual' | 'auto
     }
     if (ws !== current || generation !== compileGeneration) return;
     let cursorPage: number | null = null;
-    if ((result.status === 'success' || result.status === 'warnings') && sourcePath && sourceLine && /\.tex$/i.test(sourcePath)) {
+    if ((result.status === 'success' || result.status === 'warnings') && sourcePath && sourceLine && /\.tex$/i.test(sourcePath) && !inPreamble(current.getText(sourcePath), sourceLine)) {
       try { cursorPage = synctex?.forward(sourcePath, sourceLine)[0]?.page ?? null; }
       catch { /* Navigation is optional if the source has no usable mapping. */ }
     }
@@ -911,7 +912,7 @@ export function forwardSearch(line?: number) {
     toast({ kind: 'info', title: 'Compile first', message: 'SyncTeX data is created with each compile.' });
     return;
   }
-  line ??= e.getPosition()?.lineNumber ?? 1;
+  line ??= editorBridge.cursorLine() ?? 1;
   const rects = synctex.forward(path, line);
   if (!rects.length) toast({ kind: 'info', title: 'No PDF location for this line' });
   else setState({ pdfTarget: { rects, nonce: Date.now() } });

@@ -1,7 +1,10 @@
 # Cursor page after compilation
 
 After a successful compile, GitLaTeX opens the PDF page corresponding to the
-editor cursor captured when that build started. Included `.tex` files work
+editor cursor captured when that build started. With the cursor in the
+preamble (before `\begin{document}`) the PDF stays where it was: SyncTeX
+attributes text to the line where a macro is defined, so a cursor on a
+`\newcommand` line would otherwise jump to wherever that macro is used. Included `.tex` files work
 through the existing SyncTeX mapping. This applies to both the React interface
 and `/classic`.
 

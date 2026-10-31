@@ -261,6 +261,8 @@ function lastCiteSource(): CiteSource {
 
 /** The keys typed so far when the cursor is already inside \cite{…}, else null. */
 function openCiteArgument(): string | null {
+  // The LyX-style editor has no \cite{…} source to type into.
+  if (editorBridge.cursorLineIsElsewhere()) return null;
   const e = editorBridge.get();
   const pos = e?.getPosition();
   const model = e?.getModel();

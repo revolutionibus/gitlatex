@@ -148,8 +148,45 @@ function AppearancePage() {
 
 function EditorPage() {
   const s = useStore((st) => st.settings);
+  const lyx = s.lyxEnabled !== false;
   return (
     <>
+      <Group title="LyX-style editor">
+        <Switch
+          label="LyX-style editor"
+          description="Show the Source | LyX switch above .tex files. Off: every file opens as LaTeX source."
+          checked={lyx}
+          onChange={(v) => updateSettings({ lyxEnabled: v })}
+        />
+      </Group>
+      {lyx && (
+      <section className="mt-6">
+        <h4 className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted">Editor style for .tex files</h4>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {([
+            ['source', 'Source', 'The LaTeX source, with completion, snippets and Vim mode'],
+            ['lyx', 'LyX style', 'What you see is what you mean: headings, lists, theorems and live formulas; LaTeX only where needed'],
+          ] as const).map(([id, label, hint]) => (
+            <button
+              key={id}
+              onClick={() => updateSettings({ editorStyle: id })}
+              className={clsx('focus-ring rounded-lg border p-3 text-left', s.editorStyle === id ? 'border-accent bg-accent/10' : 'border-line hover:bg-hover')}
+            >
+              <span className="block text-[13px] font-medium text-fg">{label}</span>
+              <span className="mt-0.5 block text-[11.5px] leading-snug text-muted">{hint}</span>
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-[11.5px] text-faint">Switch any time with Source | LyX above the editor. Other files always open as source.</p>
+      </section>
+      )}
+      {lyx && (
+      <Group title="LyX-style typing">
+        <Switch label="$ starts a formula" description="Off: $ is typed as a dollar sign (Ctrl+M still inserts a formula)" checked={s.lyxDollarMath} onChange={(v) => updateSettings({ lyxDollarMath: v })} />
+        <Switch label={'" gives “typographic” quotes'} description="Opening or closing, by what comes before" checked={s.lyxSmartQuotes} onChange={(v) => updateSettings({ lyxSmartQuotes: v })} />
+        <Switch label="Ignore spaces LaTeX would ignore" description="At the start of a paragraph, and a second space in a row" checked={s.lyxSpaceRules} onChange={(v) => updateSettings({ lyxSpaceRules: v })} />
+      </Group>
+      )}
       <Group title="Writing assistance">
         <Switch label="Slash commands" description="Type / on an empty line to insert blocks" checked={s.slashCommands} onChange={(v) => updateSettings({ slashCommands: v })} />
         <Switch label="Live math preview" description="Rendered preview of the formula under the cursor" checked={s.mathPreview} onChange={(v) => updateSettings({ mathPreview: v })} />

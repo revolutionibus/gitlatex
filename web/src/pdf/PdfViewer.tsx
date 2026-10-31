@@ -659,7 +659,9 @@ export const PdfViewer = forwardRef<
 
   const last = back[back.length - 1];
   return (
-    <div ref={wrapper} onKeyDown={onKeyDown} className={dark ? 'pdf-pane pdf-dark relative h-full' : 'pdf-pane relative h-full'}>
+    // isolate: pdf.js's layers and our overlays stack inside the viewer, so
+    // the pane's banners (compile errors) always sit on top of them.
+    <div ref={wrapper} onKeyDown={onKeyDown} className={dark ? 'pdf-pane pdf-dark relative isolate h-full' : 'pdf-pane relative isolate h-full'}>
       {/* PDFViewer refuses a scroller that is not absolutely positioned. */}
       <div
         ref={scroller}

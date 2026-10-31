@@ -1,0 +1,394 @@
+/*
+ * The LyX-style editor (src/lyx/). Everything is scoped to .lyx-root and
+ * uses the app's theme colours, so it follows light and dark mode.
+ * Numbers (sections, items, theorems, formulas, footnotes) come from
+ * data-num attributes set by the numbering plugin (setup.ts).
+ */
+
+.lyx-root {
+  --lyx-indent: 1.6em;
+  --lyx-ert: #c0392b;
+  background: var(--c-panel);
+  color: var(--c-fg);
+}
+[data-theme='dark'] .lyx-root {
+  --lyx-ert: #ff7b72;
+}
+
+.lyx-root .lyx-host {
+  max-width: 46em;
+  margin: 0 auto;
+  padding: 2em 2.5em 40vh;
+}
+
+.lyx-root .lyx-doc {
+  outline: none;
+  font-family: 'Latin Modern Roman', 'CMU Serif', 'Computer Modern Serif', Georgia, 'Times New Roman', serif;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+}
+
+/* ---- paragraphs and layouts ---------------------------------------------------------- */
+
+.lyx-root .lyx-par,
+.lyx-root .lyx-display,
+.lyx-root .lyx-ert {
+  margin: 0 0 0.6em calc(var(--lyx-depth, 0) * var(--lyx-indent));
+  position: relative;
+}
+.lyx-root .lyx-par:empty::after,
+.lyx-root .lyx-par > br.ProseMirror-trailingBreak:only-child {
+  content: '';
+}
+
+.lyx-root [data-num]::before {
+  content: attr(data-num) ' ';
+}
+
+/* Headings */
+.lyx-root :is(.lyx-l-part, .lyx-l-part-star, .lyx-l-chapter, .lyx-l-chapter-star, .lyx-l-section, .lyx-l-section-star,
+  .lyx-l-subsection, .lyx-l-subsection-star, .lyx-l-subsubsection, .lyx-l-subsubsection-star) {
+  font-weight: 700;
+  line-height: 1.25;
+  margin-top: 1.1em;
+}
+.lyx-root :is(.lyx-l-part, .lyx-l-part-star) { font-size: 2em; text-align: center; }
+.lyx-root :is(.lyx-l-chapter, .lyx-l-chapter-star) { font-size: 1.75em; margin-top: 1.4em; }
+.lyx-root :is(.lyx-l-section, .lyx-l-section-star) { font-size: 1.4em; }
+.lyx-root :is(.lyx-l-subsection, .lyx-l-subsection-star) { font-size: 1.2em; }
+.lyx-root :is(.lyx-l-subsubsection, .lyx-l-subsubsection-star) { font-size: 1.05em; }
+.lyx-root :is(.lyx-l-paragraph, .lyx-l-paragraph-star, .lyx-l-subparagraph, .lyx-l-subparagraph-star) { font-weight: 700; }
+.lyx-root .lyx-par[data-num]:is(.lyx-l-chapter)::before {
+  content: 'Chapter ' attr(data-num);
+  display: block;
+  font-size: 0.7em;
+  margin-bottom: 0.3em;
+}
+.lyx-root :is(.lyx-l-section, .lyx-l-subsection, .lyx-l-subsubsection)[data-num]::before {
+  content: attr(data-num);
+  margin-right: 0.8em;
+}
+
+/* Front matter */
+.lyx-root .lyx-l-title { font-size: 1.75em; text-align: center; margin: 0.6em 0 0.3em; }
+.lyx-root :is(.lyx-l-author, .lyx-l-date) { text-align: center; font-size: 1.1em; }
+.lyx-root .lyx-l-abstract { margin-left: 2.5em; margin-right: 2.5em; font-size: 0.95em; }
+.lyx-root .lyx-l-abstract[data-num]::before {
+  content: 'Abstract';
+  display: block;
+  text-align: center;
+  font-weight: 700;
+  margin-bottom: 0.3em;
+}
+
+/* Lists: the item label hangs to the left of the text. */
+.lyx-root :is(.lyx-l-itemize, .lyx-l-enumerate, .lyx-l-description) {
+  padding-left: var(--lyx-indent);
+  margin-bottom: 0.25em;
+}
+.lyx-root :is(.lyx-l-itemize, .lyx-l-enumerate)[data-num]::before {
+  content: attr(data-num);
+  position: absolute;
+  left: 0;
+  width: calc(var(--lyx-indent) - 0.4em);
+  text-align: right;
+}
+.lyx-root .lyx-l-description[data-num]::before {
+  content: attr(data-num) ' ';
+  font-weight: 700;
+  margin-left: calc(-1 * var(--lyx-indent));
+}
+
+/* Quotes */
+.lyx-root :is(.lyx-l-quote, .lyx-l-quotation, .lyx-l-verse) { margin-left: 2.5em; margin-right: 2.5em; }
+
+/* Theorems: the label is bold, the text italic for plain-style theorems (amsthm). */
+.lyx-root .lyx-par[data-layout]:is([data-layout='Theorem'], [data-layout='Lemma'], [data-layout='Corollary'], [data-layout='Proposition'],
+  [data-layout='Conjecture'], [data-layout='Claim']) {
+  font-style: italic;
+}
+.lyx-root .lyx-par[data-num]:not(.lyx-l-standard, .lyx-l-itemize, .lyx-l-enumerate, .lyx-l-description, .lyx-l-abstract,
+  .lyx-l-chapter, .lyx-l-section, .lyx-l-subsection, .lyx-l-subsubsection, .lyx-l-part)::before {
+  font-style: normal;
+  font-weight: 700;
+  margin-right: 0.4em;
+}
+.lyx-root .lyx-l-proof[data-num]::before {
+  font-weight: 400 !important;
+  font-style: italic !important;
+}
+
+/* ---- math ---------------------------------------------------------------------------- */
+
+.lyx-root .lyx-math math-field {
+  display: inline-block;
+  min-width: 1em;
+  padding: 0 1px;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 1em;
+  vertical-align: -0.15em;
+}
+.lyx-root .lyx-display {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 1em;
+  margin: 0.4em 0 0.8em calc(var(--lyx-depth, 0) * var(--lyx-indent));
+}
+.lyx-root .lyx-display math-field {
+  flex: 0 1 auto;
+  min-width: 3em;
+  font-size: 1.1em;
+  border-radius: 4px;
+}
+.lyx-root .lyx-display[data-num]::before {
+  content: none;
+}
+.lyx-root .lyx-display[data-num]::after {
+  content: attr(data-num);
+  position: absolute;
+  right: 0;
+}
+.lyx-root math-field {
+  --caret-color: var(--c-accent);
+  --selection-background-color: rgb(var(--c-accent-rgb) / 0.25);
+  --selection-color: var(--c-fg);
+  /* The box around the part the caret is in (a fraction, a bracket). MathLive
+     picks its colour from the system's light/dark mode, not the app's theme. */
+  --contains-highlight-background-color: rgb(var(--c-accent-rgb) / 0.12);
+  --text-highlight-background-color: rgb(var(--c-accent-rgb) / 0.12);
+  --primary-color: var(--c-accent);
+  --text-font-family: inherit;
+  color: inherit;
+  /* MathLive paints its field white; the page shows through instead (dark mode). */
+  background: transparent;
+  outline: none;
+  border: none;
+}
+.lyx-root math-field:focus-within,
+.lyx-root .ProseMirror-selectednode math-field {
+  background: rgb(var(--c-accent-rgb) / 0.08);
+  box-shadow: 0 0 0 1px rgb(var(--c-accent-rgb) / 0.5);
+}
+.lyx-root math-field::part(virtual-keyboard-toggle),
+.lyx-root math-field::part(menu-toggle) {
+  display: none;
+}
+
+/* ---- insets ---------------------------------------------------------------------------- */
+
+/* TeX code (LyX's ERT): red, monospace, framed. */
+.lyx-root .lyx-ert,
+.lyx-root .lyx-ert-inline {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.82em;
+  color: var(--lyx-ert);
+  white-space: pre-wrap;
+}
+.lyx-root .lyx-ert {
+  border: 1px solid color-mix(in srgb, var(--lyx-ert) 45%, transparent);
+  border-radius: 4px;
+  padding: 0.35em 0.6em;
+  background: color-mix(in srgb, var(--lyx-ert) 5%, transparent);
+}
+.lyx-root .lyx-ert-inline {
+  border: 1px solid color-mix(in srgb, var(--lyx-ert) 35%, transparent);
+  border-radius: 3px;
+  padding: 0 0.2em;
+}
+.lyx-root .lyx-ert code {
+  font: inherit;
+}
+
+.lyx-root .lyx-footnote {
+  border: 1px solid var(--c-line);
+  border-radius: 4px;
+  padding: 0 0.3em;
+  font-size: 0.85em;
+  background: var(--c-bg);
+}
+.lyx-root .lyx-footnote[data-num]::before {
+  content: 'foot ' attr(data-num);
+  font-family: system-ui, sans-serif;
+  font-size: 0.75em;
+  color: var(--c-muted);
+  margin-right: 0.35em;
+}
+
+/* LyX notes: not printed. */
+.lyx-root .lyx-note {
+  margin: 0 0 0.6em calc(var(--lyx-depth, 0) * var(--lyx-indent));
+  border-left: 3px solid #d4a72c;
+  border-radius: 3px;
+  padding: 0.3em 0.6em;
+  background: color-mix(in srgb, #d4a72c 12%, transparent);
+  font-family: system-ui, sans-serif;
+  font-size: 0.85em;
+  white-space: pre-wrap;
+}
+.lyx-root .lyx-note::before {
+  content: 'Note';
+  display: block;
+  font-size: 0.75em;
+  font-weight: 600;
+  color: #9a7412;
+}
+[data-theme='dark'] .lyx-root .lyx-note::before { color: #e3b341; }
+
+/* Floats: a framed box, labelled with its kind. */
+.lyx-root .lyx-float {
+  margin: 0.6em 0 0.9em calc(var(--lyx-depth, 0) * var(--lyx-indent));
+  border: 1px solid var(--c-line);
+  border-radius: 6px;
+  padding: 1.4em 0.8em 0.4em;
+  position: relative;
+  text-align: center;
+}
+.lyx-root .lyx-float::before {
+  content: 'float: ' attr(data-env);
+  position: absolute;
+  top: 0.2em;
+  left: 0.6em;
+  font-family: system-ui, sans-serif;
+  font-size: 11px;
+  color: var(--c-faint);
+}
+.lyx-root .lyx-float > .lyx-par { text-align: center; }
+.lyx-root .lyx-float > .lyx-ert { text-align: left; }
+.lyx-root .lyx-l-caption { font-size: 0.95em; }
+.lyx-root .lyx-l-caption[data-num]::before {
+  content: attr(data-num) ' ';
+  font-weight: 600;
+}
+
+/* Graphics */
+.lyx-root .lyx-graphics { display: inline-block; max-width: 100%; vertical-align: middle; }
+.lyx-root .lyx-graphics img { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.lyx-root .lyx-graphics-name {
+  display: inline-block;
+  padding: 0.5em 0.8em;
+  border: 1px dashed var(--c-faint);
+  border-radius: 4px;
+  font-family: system-ui, sans-serif;
+  font-size: 12px;
+  color: var(--c-muted);
+}
+.lyx-root .lyx-graphics-name::before { content: '🖼 '; }
+
+/* Margin notes */
+.lyx-root .lyx-footnote[data-kind='marginpar']::before {
+  content: 'margin';
+  font-family: system-ui, sans-serif;
+  font-size: 0.75em;
+  color: var(--c-muted);
+  margin-right: 0.35em;
+}
+
+/* Alignment */
+.lyx-root .lyx-par[data-align='center'] { text-align: center; }
+.lyx-root .lyx-par[data-align='flushleft'] { text-align: left; }
+.lyx-root .lyx-par[data-align='flushright'] { text-align: right; }
+
+/* Labels, references, citations and URLs: small boxes, as LyX shows them. */
+.lyx-root :is(.lyx-label, .lyx-ref, .lyx-cite, .lyx-url) {
+  font-family: system-ui, sans-serif;
+  /* The same size in a heading as in the text. */
+  font-size: 11.5px;
+  font-weight: 400;
+  font-style: normal;
+  border-radius: 3px;
+  padding: 0 0.35em;
+  margin: 0 0.1em;
+  white-space: nowrap;
+  vertical-align: 0.1em;
+}
+.lyx-root .lyx-label { border: 1px dashed var(--c-faint); color: var(--c-muted); }
+.lyx-root .lyx-label::before { content: 'label: '; }
+.lyx-root .lyx-ref { background: rgb(var(--c-accent-rgb) / 0.12); color: var(--c-accent); }
+.lyx-root .lyx-ref::before { content: 'ref: '; }
+.lyx-root .lyx-cite { background: color-mix(in srgb, var(--c-ok) 14%, transparent); color: var(--c-ok); }
+.lyx-root .lyx-cite::before { content: '['; }
+.lyx-root .lyx-cite::after { content: ']'; }
+.lyx-root .lyx-url { color: var(--c-info); text-decoration: underline; }
+.lyx-root .lyx-href { color: var(--c-info); text-decoration: underline; }
+.lyx-root .lyx-display-label { font-size: 0.7em; }
+
+/* Text styles */
+.lyx-root .lyx-noun { font-variant: small-caps; }
+.lyx-root .lyx-sans { font-family: system-ui, sans-serif; }
+.lyx-root tt { font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.9em; }
+
+.lyx-root .ProseMirror-selectednode:not(.lyx-math, .lyx-display) {
+  outline: 2px solid rgb(var(--c-accent-rgb) / 0.6);
+  outline-offset: 1px;
+}
+
+/* Tables: LaTeX's lines as cell borders (rules from the row's data-rule,
+   vertical lines from lyx-vl / lyx-vr, set by the tableLooks plugin). */
+.lyx-root .lyx-table {
+  margin: 0.4em 0 0.8em calc(var(--lyx-depth, 0) * var(--lyx-indent));
+  overflow-x: auto;
+  white-space: normal;
+}
+.lyx-root .lyx-float > .lyx-table,
+.lyx-root .lyx-table[data-align='center'] { text-align: center; }
+.lyx-root .lyx-table[data-align='flushright'] { text-align: right; }
+.lyx-root .lyx-table table {
+  display: inline-table;
+  border-collapse: collapse;
+  table-layout: auto;
+  font-size: 0.95em;
+}
+.lyx-root .lyx-table td {
+  min-width: 2.2em;
+  padding: 0.15em 0.6em;
+  vertical-align: top;
+  white-space: pre-wrap;
+  /* Cells without lines still show where they are while editing. */
+  outline: 1px dashed color-mix(in srgb, var(--c-line) 70%, transparent);
+  outline-offset: -1px;
+}
+.lyx-root .lyx-table tr[data-rule='1'] > td { border-top: 1px solid var(--c-fg); }
+.lyx-root .lyx-table tr[data-rule='thick'] > td { border-top: 2px solid var(--c-fg); }
+.lyx-root .lyx-table tr[data-rule='2'] > td { border-top: 3px double var(--c-fg); }
+.lyx-root .lyx-table tr[data-rule='part'] > td { border-top: 1px dotted var(--c-fg); }
+.lyx-root .lyx-table table[data-bottom='1'] tr:last-child > td { border-bottom: 1px solid var(--c-fg); }
+.lyx-root .lyx-table table[data-bottom='thick'] tr:last-child > td { border-bottom: 2px solid var(--c-fg); }
+.lyx-root .lyx-table table[data-bottom='2'] tr:last-child > td { border-bottom: 3px double var(--c-fg); }
+.lyx-root .lyx-table td.lyx-vl { border-left: 1px solid var(--c-fg); }
+.lyx-root .lyx-table td.lyx-vr { border-right: 1px solid var(--c-fg); }
+/* Cells selected by dragging or Shift+click (prosemirror-tables). */
+.lyx-root .lyx-table td.selectedCell { background: color-mix(in srgb, var(--c-accent) 18%, transparent); }
+.lyx-root .lyx-table td.selectedCell ::selection { background: transparent; }
+
+/* The table toolbar's line buttons: a box with the line on one side. */
+.lyx-tb-line {
+  display: inline-block;
+  width: 0.85rem;
+  height: 0.85rem;
+  border: 1px dotted currentColor;
+  opacity: 0.9;
+}
+.lyx-tb-line[data-side='top'] { border-top: 2px solid currentColor; }
+.lyx-tb-line[data-side='bottom'] { border-bottom: 2px solid currentColor; }
+.lyx-tb-line[data-side='left'] { border-left: 2px solid currentColor; }
+.lyx-tb-line[data-side='right'] { border-right: 2px solid currentColor; }
+
+/* Find & replace matches (find.ts). */
+.lyx-root .lyx-find { background: color-mix(in srgb, #f5c542 35%, transparent); border-radius: 2px; }
+.lyx-root .lyx-find-current { background: color-mix(in srgb, #f5a524 70%, transparent); outline: 1px solid #f5a524; }
+
+/* A bookmark's place (bookmarks.ts): a small number, as LyX marks them. */
+.lyx-root .lyx-bookmark {
+  display: inline-block;
+  margin: 0 1px;
+  padding: 0 3px;
+  border-radius: 3px;
+  background: var(--c-accent);
+  color: var(--c-accent-fg, #fff);
+  font: 600 9px/13px ui-sans-serif, system-ui, sans-serif;
+  vertical-align: 0.35em;
+  user-select: none;
+}

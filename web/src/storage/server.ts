@@ -116,7 +116,8 @@ export interface LocalCompileResult {
   success?: boolean;
   error?: string;
   log?: string;
-  steps?: { tool: string; missing?: boolean }[];
+  /** `message`: why a bibliography tool failed (biber and biblatex versions that do not match…). */
+  steps?: { tool: string; missing?: boolean; exitCode?: number; message?: string }[];
   engine?: string;
 }
 
@@ -276,3 +277,13 @@ export const zotero = {
       body: JSON.stringify({ ids, source, biblatex }),
     }),
 };
+
+/** An EPS figure of the project converted to PDF by the server (epstopdf / Ghostscript); null when it has no converter. */
+export async function epsPreview(path: string): Promise<Uint8Array | null> {
+  try {
+    const res = await fetch('/api/figure/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
+    return res.ok && res.headers.get('Content-Type')?.includes('pdf') ? new Uint8Array(await res.arrayBuffer()) : null;
+  } catch {
+    return null;
+  }
+}

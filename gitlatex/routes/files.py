@@ -10,7 +10,7 @@ from flask import Blueprint, jsonify, request, send_file
 
 from gitlatex import state
 from gitlatex.http import MIME_TYPES, _json
-from gitlatex.services import comments
+from gitlatex.services import comments, figures
 from gitlatex.services.paths import flatten_file_tree, read_dir_recursive, resolve_repo_path
 
 bp = Blueprint("files", __name__)
@@ -269,3 +269,20 @@ def upload_files():
         return jsonify(success=True, created=created)
     except Exception as e:
         return jsonify(error=str(e)), 500
+
+
+@bp.route("/api/figure/preview", methods=["POST"])
+def figure_preview():
+    """An EPS figure of the project as PDF, for the LyX-style editor to show."""
+    if not state.current_repo_path:
+        return jsonify(error="No repository selected"), 400
+    rel = _json().get("path") or ""
+    full = resolve_repo_path(rel)
+    if not full or not full.lower().endswith((".eps", ".ps")):
+        return jsonify(error="Not an EPS figure in the project"), 400
+    if not os.path.isfile(full):
+        return jsonify(error="File not found"), 404
+    pdf = figures.eps_to_pdf(full)
+    if pdf is None:
+        return jsonify(error="No EPS converter (epstopdf or Ghostscript) is installed"), 404
+    return send_file(io.BytesIO(pdf), mimetype="application/pdf")

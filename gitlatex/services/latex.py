@@ -5,9 +5,13 @@ parse_latex_log turns the resulting log into the structured problem list the
 editor shows in its Problems tab.
 """
 
+import glob
+import hashlib
 import os
 import re
+import shutil
 import subprocess
+import time
 
 LATEX_ENGINES = ("pdflatex", "xelatex", "lualatex")
 
@@ -80,19 +84,113 @@ def parse_latex_log(log_text, main_file):
     return problems
 
 
+
+# Files TeX writes on one pass and reads back on the next. A pass is repeated
+# only while one of them changes (latexmk's rule), so an ordinary edit compiles
+# in one pass. .loa (algorithms), .thm (ntheorem) and minitoc's .mtc* are
+# watched too: their packages only say "rerun", they keep nothing in the .aux.
+_READ_BACK = (".aux", ".toc", ".lof", ".lot", ".loa", ".out", ".bbl", ".nav", ".snm", ".thm", ".ind", ".gls", ".acr")
+_MAX_PASSES = 5
+
+# What biber / bibtex last read, per document (and whether it failed), so the
+# tool runs only when citations, .bib files or the tool itself change. A
+# failure on unchanged inputs is reported again instead of rerun.
+_bib_runs = {}
+
+
+def _read(path):
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            return f.read()
+    except OSError:
+        return ""
+
+
+def _aux_files(workdir, base):
+    """The main .aux and the .aux of every \\include'd file (listed in it as \\@input{…})."""
+    out, todo = [], [base + ".aux"]
+    while todo:
+        rel = todo.pop()
+        if rel in out:
+            continue
+        out.append(rel)
+        todo += re.findall(r"\\@input\{([^}]+\.aux)\}", _read(os.path.join(workdir, rel)))
+    return out
+
+
+def _fingerprint(workdir, paths):
+    h = hashlib.sha1()
+    for rel in sorted(set(paths)):
+        h.update(rel.encode("utf-8", "replace") + b"\0")
+        try:
+            with open(os.path.join(workdir, rel), "rb") as f:
+                h.update(f.read())
+        except OSError:
+            h.update(b"\1missing")
+    return h.hexdigest()
+
+
+def _read_back_state(workdir, base):
+    files = [base + ext for ext in _READ_BACK] + _aux_files(workdir, base)
+    files += [os.path.relpath(p, workdir) for p in glob.glob(os.path.join(workdir, glob.escape(base) + ".mtc*"))]
+    return _fingerprint(workdir, files)
+
+
+def _bib_signature(workdir, base, tool):
+    """Everything the bibliography tool reads: the citations, the .bib files, the tool."""
+    if tool == "biber":
+        # The .bcf lists every citation and data source.
+        bcf = _read(os.path.join(workdir, base + ".bcf"))
+        bibs = re.findall(r"<bcf:datasource[^>]*>([^<]+)</bcf:datasource>", bcf)
+        cites = bcf
+    else:
+        # bibtex reads \citation, \bibdata and \bibstyle from the main .aux and
+        # from those of \include'd files.
+        lines = []
+        for aux in _aux_files(workdir, base):
+            lines += [l for l in _read(os.path.join(workdir, aux)).splitlines() if l.startswith(("\\citation", "\\bibdata", "\\bibstyle"))]
+        cites = "\n".join(lines)
+        bibs = []
+        for m in re.findall(r"\\bibdata\{([^}]*)\}", cites):
+            bibs += [b.strip() if b.strip().endswith(".bib") else b.strip() + ".bib" for b in m.split(",") if b.strip()]
+    exe = shutil.which(tool) or tool
+    try:
+        exe += ":%d" % os.path.getmtime(exe)  # a reinstalled tool runs again
+    except OSError:
+        pass
+    return hashlib.sha1((cites + "\0" + exe).encode("utf-8", "replace")).hexdigest() + _fingerprint(workdir, bibs)
+
+
+def _tool_error(out):
+    """The first error biber or bibtex printed, for the Problems list."""
+    for line in (out or "").splitlines():
+        line = line.strip()
+        if re.match(r"(ERROR - |I couldn't|I found no|Illegal|Sorry---)", line):
+            return re.sub(r"^ERROR - (Error: )?", "", line)
+    return None
+
+
 def run_latex_build(repo_path, main_file, engine="pdflatex"):
     """
     Full LaTeX build: engine -> bibliography (biber/bibtex) -> engine reruns
     until cross-references settle. Returns log, structured problems and steps.
+
+    As latexmk does it: a pass is repeated only while the files TeX reads back
+    change (or, once, when the log asks for a rerun); the bibliography tool runs
+    only when what it reads changed; and XeLaTeX writes its .xdv on each pass
+    and the PDF once at the end.
     """
     base = os.path.splitext(main_file)[0]
     workdir = repo_path
     steps = []
     log_parts = []
+    started = time.time()
+    # XeLaTeX: making the PDF is about a third of a pass; do it once, at the end.
+    via_xdv = engine == "xelatex" and shutil.which("xdvipdfmx") is not None
 
     def engine_pass(label):
         cmd = [engine, "-interaction=nonstopmode", "-file-line-error",
-               "-synctex=1", main_file]
+               "-synctex=1"] + (["-no-pdf"] if via_xdv else []) + [main_file]
         try:
             code, out = _run_tool(cmd, workdir)
         except FileNotFoundError:
@@ -103,71 +201,89 @@ def run_latex_build(repo_path, main_file, engine="pdflatex"):
         log_parts.append("$ " + " ".join(cmd) + "\n" + out)
         return code
 
-    def read_aux_log():
+    def read_log():
         # The .log file is far richer than stdout; prefer it when present.
-        log_file = os.path.join(workdir, base + ".log")
-        if os.path.isfile(log_file):
-            try:
-                with open(log_file, "r", encoding="utf-8", errors="replace") as f:
-                    return f.read()
-            except OSError:
-                return ""
-        return ""
+        return _read(os.path.join(workdir, base + ".log"))
 
+    before = _read_back_state(workdir, base)
     engine_pass("pass 1")
+    passes = 1
 
     # Bibliography: biblatex leaves a .bcf (biber), classic bibtex leaves
-    # \bibdata in the .aux. Skip entirely when neither is present.
-    bcf = os.path.join(workdir, base + ".bcf")
-    aux = os.path.join(workdir, base + ".aux")
-    aux_text = ""
-    if os.path.isfile(aux):
-        try:
-            with open(aux, "r", encoding="utf-8", errors="replace") as f:
-                aux_text = f.read()
-        except OSError:
-            aux_text = ""
-
+    # \bibdata in the .aux. Skip it when neither is there, or when nothing it
+    # reads changed since it last ran and its .bbl is still there.
     bib_tool = None
-    if os.path.isfile(bcf):
+    if os.path.isfile(os.path.join(workdir, base + ".bcf")):
         bib_tool = ["biber", base]
-    elif "\\bibdata" in aux_text:
+    elif "\\bibdata" in _read(os.path.join(workdir, base + ".aux")):
         bib_tool = ["bibtex", base]
 
     if bib_tool:
-        try:
-            code, out = _run_tool(bib_tool, workdir)
-            steps.append({"tool": bib_tool[0], "label": "bibliography", "exitCode": code})
-            log_parts.append("$ " + " ".join(bib_tool) + "\n" + out)
-        except FileNotFoundError:
-            log_parts.append(
-                bib_tool[0] + " not found - citations may be unresolved. "
-                "Install it with your LaTeX distribution."
-            )
-            steps.append({"tool": bib_tool[0], "label": "bibliography", "exitCode": -1,
-                          "missing": True})
+        key = (os.path.abspath(workdir), base)
+        sig = _bib_signature(workdir, base, bib_tool[0])
+        last = _bib_runs.get(key)
+        unchanged = last is not None and last["sig"] == sig
+        if unchanged and last["error"]:
+            # It failed on exactly these inputs: it would fail again.
+            steps.append({"tool": bib_tool[0], "label": "bibliography (inputs unchanged, not rerun)",
+                          "exitCode": last["code"], "message": last["error"]})
+        elif not unchanged or not os.path.isfile(os.path.join(workdir, base + ".bbl")):
+            try:
+                code, out = _run_tool(bib_tool, workdir)
+                error = (_tool_error(out) or "%s failed (exit code %d)" % (bib_tool[0], code)) if code else None
+                step = {"tool": bib_tool[0], "label": "bibliography", "exitCode": code}
+                if error:
+                    step["message"] = error
+                steps.append(step)
+                log_parts.append("$ " + " ".join(bib_tool) + "\n" + out)
+                _bib_runs[key] = {"sig": sig, "code": code, "error": error}
+            except FileNotFoundError:
+                log_parts.append(
+                    bib_tool[0] + " not found - citations may be unresolved. "
+                    "Install it with your LaTeX distribution."
+                )
+                steps.append({"tool": bib_tool[0], "label": "bibliography", "exitCode": -1,
+                              "missing": True})
 
-    # Rerun until references settle (bounded), always at least one extra pass
-    # when a bibliography ran.
-    max_reruns = 3 if bib_tool else 2
-    for n in range(max_reruns):
-        engine_pass("rerun %d" % (n + 1))
-        text = read_aux_log()
-        if not _RERUN_RE.search(text or "") and not (bib_tool and n == 0):
-            break
+    # Rerun while what TeX reads back keeps changing. When nothing changed but
+    # the log still asks for a rerun (a package with files of its own), one
+    # more pass; a genuinely undefined \ref does not loop.
+    asked = False
+    while passes < _MAX_PASSES:
+        after = _read_back_state(workdir, base)
+        if after == before:
+            if asked or not _RERUN_RE.search(read_log()):
+                break
+            asked = True
+        before = after
+        passes += 1
+        engine_pass("rerun %d" % (passes - 1))
 
-    full_log = read_aux_log() or "\n".join(log_parts)
+    engine_code = steps[next(i for i in range(len(steps) - 1, -1, -1) if steps[i]["tool"] == engine)]["exitCode"]
+    pdf_error = None
+    xdv = os.path.join(workdir, base + ".xdv")
+    # Only an .xdv written by this build (a fatal error leaves the last one behind).
+    if via_xdv and os.path.isfile(xdv) and os.path.getmtime(xdv) >= started - 1:
+        cmd = ["xdvipdfmx", "-q", "-o", base + ".pdf", base + ".xdv"]
+        code, out = _run_tool(cmd, workdir)
+        steps.append({"tool": "xdvipdfmx", "label": "pdf", "exitCode": code})
+        log_parts.append("$ " + " ".join(cmd) + "\n" + out)
+        if code:
+            pdf_error = "xdvipdfmx could not make the PDF: " + ((out or "").strip().splitlines() or ["exit code %d" % code])[-1]
+
+    full_log = read_log() or "\n".join(log_parts)
     problems = parse_latex_log(full_log, main_file)
 
     pdf_file = os.path.join(workdir, base + ".pdf")
+    first_error = next((p for p in problems if p["severity"] == "error"), None)
     error = None
     if not os.path.isfile(pdf_file):
-        first_error = next((p for p in problems if p["severity"] == "error"), None)
-        error = first_error["message"] if first_error else "Compilation failed - no PDF produced."
-    elif steps and steps[-1]["exitCode"] not in (0, None):
-        first_error = next((p for p in problems if p["severity"] == "error"), None)
-        if first_error:
-            error = first_error["message"]
+        error = first_error["message"] if first_error else (pdf_error or "Compilation failed - no PDF produced.")
+    elif engine_code not in (0, None) and first_error:
+        # The engine's own result: a later step (xdvipdfmx) succeeding does not hide its errors.
+        error = first_error["message"]
+    elif pdf_error:
+        error = pdf_error
 
     return {
         "log": "\n".join(log_parts) if not full_log else full_log,

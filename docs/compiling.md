@@ -37,6 +37,14 @@ those builds too.
 - **Full multi-pass builds** — the engine runs, `biber` or `bibtex` runs when your
   document needs it, then the engine reruns until cross-references and citations
   settle. No more compiling three times by hand to clear `??`.
+- **Only the passes that are needed** (with local TeX), as `latexmk` does it:
+  - The engine reruns only while the files it reads back (`.aux`, `.toc`,
+    `.bbl`…) change, so an ordinary edit compiles in one pass.
+  - `biber` or `bibtex` runs only when your citations or `.bib` files changed,
+    including citations in `\include`d chapters.
+  - XeLaTeX makes the PDF once, at the end, instead of on every pass.
+  - If `biber` or `bibtex` fails (for example, `biber` and `biblatex` versions
+    that don't match), the reason shows with the build's problems.
 - **Choose your engine**: `pdflatex`, `xelatex` or `lualatex`.
 - **A real problems list.** Errors and warnings are parsed out of the LaTeX log
   into a clickable list — click one to jump straight to the line, with squiggles

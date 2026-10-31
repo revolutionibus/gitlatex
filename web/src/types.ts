@@ -45,6 +45,9 @@ export type ThemeMode = 'dark' | 'light' | 'system';
  */
 export type CompilerMode = 'auto' | 'browser' | 'local' | 'api';
 
+/** How .tex files are edited: the LaTeX source, or LyX-style (WYSIWYM) with the source written for you. */
+export type EditorStyle = 'source' | 'lyx';
+
 export interface Settings {
   theme: ThemeMode;
   compiler: CompilerMode;
@@ -68,6 +71,13 @@ export interface Settings {
   slashCommands: boolean;
   mathPreview: boolean;
   formatBar: boolean;
+  /** The LyX-style editor is available (the Source | LyX switch shows); off, .tex files always open as source. */
+  lyxEnabled: boolean;
+  editorStyle: EditorStyle;
+  /** The LyX-style editor's typing rules: $ starts a formula, " gives typographic quotes, extra spaces are ignored. */
+  lyxDollarMath: boolean;
+  lyxSmartQuotes: boolean;
+  lyxSpaceRules: boolean;
   engineUrl: string;
   shelfUrl: string;
 }
@@ -92,6 +102,11 @@ export const DEFAULT_SETTINGS: Settings = {
   slashCommands: true,
   mathPreview: true,
   formatBar: true,
+  lyxEnabled: true,
+  editorStyle: 'source',
+  lyxDollarMath: true,
+  lyxSmartQuotes: true,
+  lyxSpaceRules: true,
   engineUrl: '',
   shelfUrl: '',
 };

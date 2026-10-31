@@ -3,7 +3,7 @@
  * math preview, Vim mode, spell checking, snippets and review comments) and
  * previews for binary files.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import {
   Bold, FileText, Image as ImageIcon, Italic, Link2, List, ListOrdered, Sigma, Table2, Quote, X, FileCode2, BookMarked, Heading1, Download, Braces, Crosshair,
@@ -14,7 +14,7 @@ import { editorBridge } from './bridge';
 import { registerProviders, mathAt } from './providers';
 import { SlashMenu, MathPreview } from './SlashMenu';
 import { filterSlash, SLASH_COMMANDS, type SlashCommand } from './slash-commands';
-import { useStore, getState, setState, openDialog, promptText, toast } from '../state/store';
+import { useStore, getState, setState, openDialog, promptText, toast, updateSettings } from '../state/store';
 import { installSpellCheck, setSpellCheckEnabled } from './spell';
 import { installSnippets } from './snippets';
 import { installReview } from './review';
@@ -26,8 +26,15 @@ import {
 } from '../state/actions';
 import { basename, extname, isImagePath } from '../utils/paths';
 import { formatBytes, modKey } from '../utils/misc';
-import { IconButton, Button, EmptyState } from '../components/ui';
+import { IconButton, Button, EmptyState, Spinner } from '../components/ui';
 import { FileIcon } from '../components/FileIcon';
+
+// ProseMirror and MathLive load only when a file is first shown LyX-style.
+const LyxPane = lazy(() => import('../lyx/LyxPane').then((m) => ({ default: m.LyxPane })));
+
+/** Whether `path` is shown in the LyX-style editor rather than as LaTeX source. */
+const isLyxFile = (path: string | null | undefined, settings = getState().settings) =>
+  settings.lyxEnabled !== false && settings.editorStyle === 'lyx' && !!path && extname(path) === 'tex';
 
 registerLanguages();
 
@@ -88,6 +95,7 @@ export function EditorPane() {
 
   const file = activePath ? workspace()?.get(activePath) : undefined;
   const isText = file?.kind === 'text';
+  const lyx = isText && isLyxFile(activePath, settings);
   void treeVersion;
 
   const slashItems = useMemo(() => (slash ? filterSlash(slash.query) : SLASH_COMMANDS), [slash]);
@@ -395,7 +403,8 @@ export function EditorPane() {
     const vs = viewStates.current.get(activePath);
     if (vs) editor.restoreViewState(vs);
     applyMarkers();
-    if (!getState().dialog) editor.focus(); // never steal focus from an open dialog
+    // Never steal focus from an open dialog, nor from the LyX-style editor showing this file.
+    if (!getState().dialog && !isLyxFile(activePath)) editor.focus();
   }, [activePath, isText, epoch]);
 
   // Forget per-file view state when another project is opened.
@@ -485,10 +494,28 @@ export function EditorPane() {
           </div>
         ))}
       </div>
+      {isText && extname(activePath ?? '') === 'tex' && settings.lyxEnabled !== false && (
+        <div className="flex shrink-0 items-center gap-0.5 border-l border-line px-1.5" role="group" aria-label="Editor style">
+          {([
+            ['source', 'Source', 'Edit the LaTeX source'],
+            ['lyx', 'LyX', 'Edit LyX-style: see headings, lists, theorems and formulas as they will look (WYSIWYM)'],
+          ] as const).map(([id, label, title]) => (
+            <button
+              key={id}
+              title={title}
+              aria-pressed={settings.editorStyle === id}
+              onClick={() => updateSettings({ editorStyle: id })}
+              className={clsx('rounded px-2 py-0.5 text-[11.5px]', settings.editorStyle === id ? 'bg-accent/15 font-medium text-fg' : 'text-muted hover:bg-hover hover:text-fg')}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+      )}
       </div>
 
       {/* Formatting bar (great for beginners) */}
-      {settings.formatBar && isText && extname(activePath ?? '') === 'tex' && (
+      {settings.formatBar && isText && !lyx && extname(activePath ?? '') === 'tex' && (
         <div className="flex h-9 shrink-0 items-center gap-0.5 overflow-x-auto border-b border-line px-2">
           <IconButton size="sm" label={`Bold (${modKey}+B)`} onClick={fmt('bold')}><Bold className="size-3.5" /></IconButton>
           <IconButton size="sm" label={`Italic (${modKey}+I)`} onClick={fmt('italic')}><Italic className="size-3.5" /></IconButton>
@@ -514,7 +541,7 @@ export function EditorPane() {
       )}
 
       {/* Monaco, with the Vim status bar under it */}
-      <div className={clsx('flex min-h-0 flex-1', !isText && 'hidden')}>
+      <div className={clsx('flex min-h-0 flex-1', (!isText || lyx) && 'hidden')}>
         <div className="flex min-w-0 flex-1 flex-col">
           <div className="relative min-h-0 flex-1">
             <div ref={hostRef} className="absolute inset-0" data-testid="editor" />
@@ -522,6 +549,13 @@ export function EditorPane() {
           {settings.vim && <div ref={vimBarRef} className="vim-statusbar" />}
         </div>
       </div>
+
+      {lyx && activePath && (
+        <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><Spinner className="size-6 text-accent" /></div>}>
+          {/* Keyed by project too: every project has its own main.tex. */}
+          <LyxPane key={`${epoch}:${activePath}`} path={activePath} />
+        </Suspense>
+      )}
 
       {/* Binary / empty states */}
       {!isText && (

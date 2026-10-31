@@ -50,6 +50,8 @@ export default function App() {
   // Global shortcuts (Monaco handles its own while focused).
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The LyX-style editor's own keys (Ctrl+Enter: line break, Ctrl+K: delete to the end) are its.
+      if (e.defaultPrevented && (e.target as HTMLElement).closest?.('.lyx-root')) return;
       const mod = e.metaKey || e.ctrlKey;
       if (mod && (e.key === 's' || e.key === 'Enter')) {
         e.preventDefault();

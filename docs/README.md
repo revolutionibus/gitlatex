@@ -3,6 +3,7 @@
 | Doc | What it covers |
 | --- | --- |
 | [editor.md](editor.md) | The editor: autocomplete, outline, spell checking, snippets, settings |
+| [lyx-editor.md](lyx-editor.md) | The LyX-style editor: layouts, formulas, tables, menus, find & replace, bookmarks |
 | [compiling.md](compiling.md) | Local, in-browser and remote compilers; builds; PDF ↔ source sync |
 | [pdf-cursor-sync.md](pdf-cursor-sync.md) | Opening the cursor's page after a build, and highlighting what changed |
 | [pdf-viewer.md](pdf-viewer.md) | Clickable links, Back, and bookmarks in the PDF |
