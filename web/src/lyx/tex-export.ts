@@ -255,6 +255,10 @@ export function genRun(blocks: HTMLElement[], F: Needs, envFor: (layout: string)
       out.push('\\' + (b.dataset.variant || 'newpage'));
       continue;
     }
+    if (t === '_include') {
+      out.push(`\\${b.dataset.variant || 'input'}{${b.dataset.file || ''}}`);
+      continue;
+    }
     if (t === '_line') {
       out.push('\\noindent\\rule[0.5ex]{1\\columnwidth}{1pt}');
       continue;

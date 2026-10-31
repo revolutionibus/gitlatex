@@ -230,12 +230,27 @@ cursor. **Edit → Dissolve Inset** removes the box and keeps its text.
 | Horizontal line | Insert → Formatting → Horizontal Line | a rule |
 | Special characters | Insert → Special Character / Formatting: ellipsis, protected space, thin space, hyphenation point, ligature break, end of sentence… | `\ldots`, `~`, `\,`, `\-`… |
 | BibTeX bibliography | Insert → List / TOC → BibTeX Bibliography… | `\bibliographystyle` + `\bibliography` |
-| Child document | Insert → File → Child Document… | `\input{…}` |
+| Child document | Insert → File → Child Document… Shown as a box with the file name; see [Child documents](#child-documents) | `\input{…}` |
 
 Double-click a **cross-reference** to jump to its label, a **label** to rename
 it in a dialog (or press <kbd>Tab</kbd> in its paragraph to rename it in place;
-either way the references to it follow), a **citation** to change it, and a
-**graphic** to change the file or its size.
+either way the references to it follow), a **citation** to change it, a
+**graphic** to change the file or its size, and a **child document** to open it.
+
+### Child documents
+
+`\input{chapter/ch1}`, `\include{chapter/ch1}` and `\subfile{…}` show as a box
+with the file name and an **Open ↗** button. Click **Open ↗**, double-click the
+box, or use **Navigate → Open Child Document** (the one at the cursor, else the
+next one below it) to open the file in the LyX editor. The file is found the way
+TeX finds it: relative to the main file, with `.tex` added. If it does not exist
+yet, you are asked whether to create it.
+
+A child document shows **← Back to main.tex** above the editor. Click it (or use
+**Navigate → Back to Parent Document**) to return with the cursor at the
+`\input` you left from. The link also appears when you open a child file
+directly, from the file tree, as long as some file in the project inputs it.
+Compiling from a child document builds the main file as usual.
 
 ## Citations and Zotero
 
@@ -451,7 +466,7 @@ document. <kbd>Ctrl</kbd>+<kbd>K</kbd> deletes to the end of the paragraph.
 | **Edit** | Undo/redo, clipboard, paste as plain text, select all, find and replace, move paragraphs, text styles, paragraph settings (alignment, indent), math editing (numbering, formula type, math fonts, rows and columns), depth, dissolve inset, capitalize/uppercase/lowercase |
 | **View** | Open/close all insets, outline pane, source pane (a read-only view of the LaTeX the editor writes), Edit LaTeX Source, toolbars, zoom, full screen |
 | **Insert** | Math, special characters, formatting (spaces, line and page breaks, horizontal line), lists and TOC, floats, notes, file, citation, citation from Zotero, cross-reference, label, caption, table, graphics, URL, hyperlink, footnote, margin note, TeX code, date |
-| **Navigate** | Bookmarks, next note, next cross-reference, go to label, forward search (to the PDF), and the list of sections |
+| **Navigate** | Bookmarks, next note, next cross-reference, go to label, forward search (to the PDF), open child document, back to parent document, and the list of sections |
 | **Document** | Start appendix here, View/Update (compile), Settings (class, options, preamble) |
 | **Tools** | Spell checking, statistics, command buffer, preferences |
 | **Help** | Shortcuts (every key binding, searchable), About |

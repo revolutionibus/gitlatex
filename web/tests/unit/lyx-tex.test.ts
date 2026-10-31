@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseTex, macrosOf, theoremsOf, graphicsPaths } from '../../src/lyx/tex-import';
 import { exportTex, genRun, ensurePreamble } from '../../src/lyx/tex-export';
-import { latexOf, mkBlock } from '../../src/lyx/model';
+import { latexOf, mkBlock, mkSpecial } from '../../src/lyx/model';
 import { tabularOp } from '../../src/lyx/tabular';
 
 const DOC = String.raw`\documentclass[11pt]{article}
@@ -219,6 +219,24 @@ Bo \& Co & 1 & 2 \\
     const { blocks, save } = load('\\begin{tabular}{cc\na & b\n');
     expect(blocks()[0].querySelector('[data-inset="Tabular"]')).toBeNull();
     expect(save()).toBe('\\begin{tabular}{cc\na & b\n');
+  });
+});
+
+describe('LyX-style editor: child documents', () => {
+  const SRC = '\\documentclass{report}\n\\begin{document}\nIntro.\n\n\\include{chapter/ch1}\n\n\\input{chapter/ch2}\n% \\input{chapter/old}\n\n\\input{a}\\input{b}\n\\end{document}\n';
+  const kids = (ed: HTMLElement) => [...ed.querySelectorAll<HTMLElement>('.blk[data-type="_include"]')].map((b) => `${b.dataset.variant} ${b.dataset.file}`);
+
+  it('reads \\input and \\include as child document blocks and writes them back unchanged', () => {
+    const { ed, save } = load(SRC);
+    expect(kids(ed)).toEqual(['include chapter/ch1', 'input chapter/ch2', 'input a', 'input b']);
+    expect(ed.querySelector('.blk[data-type="_include"]')!.textContent).toContain('chapter/ch1');
+    expect(save()).toBe(SRC);
+  });
+
+  it('writes a new child document block as \\input', () => {
+    const { blocks, save } = load('\\documentclass{article}\n\\begin{document}\nText.\n\\end{document}\n');
+    blocks()[0].after(mkSpecial('_include', 'input', 'sections/intro'));
+    expect(save()).toContain('Text.\n\n\\input{sections/intro}\n');
   });
 });
 

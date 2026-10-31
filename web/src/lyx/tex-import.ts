@@ -214,7 +214,7 @@ function isBlockEnv(env: string, theorems: Record<string, string>) {
 }
 const HEADS = new Set(HEAD_CMD);
 const FRONT_CMDS: Record<string, string> = { title: 'Title', author: 'Author', date: 'Date' };
-const BLOCK_CMDS = new Set(['maketitle', 'tableofcontents', 'newpage', 'clearpage', 'cleardoublepage', 'pagebreak', 'appendix', 'bibliography', 'bibliographystyle', 'printbibliography', 'input', 'include', 'par']);
+const BLOCK_CMDS = new Set(['maketitle', 'tableofcontents', 'newpage', 'clearpage', 'cleardoublepage', 'pagebreak', 'appendix', 'bibliography', 'bibliographystyle', 'printbibliography', 'input', 'include', 'subfile', 'par']);
 
 const ACCENT: Record<string, string> = { "'": '́', '`': '̀', '^': '̂', '"': '̈', '~': '̃', '=': '̄', '.': '̇', c: '̧', v: '̌', u: '̆', H: '̋', r: '̊', k: '̨' };
 /** Symbol commands from packages (amssymb, pifont…): shown as the glyph, written back as the command. */
@@ -960,7 +960,9 @@ function parseOne(r: Reader, ctx: Ctx, frame: Frame, out: HTMLElement[], layout:
           break;
         }
       }
-      out.push(stamp(ertBlock(s.slice(start, r.i))));
+      const src = s.slice(start, r.i);
+      const child = /^\\(input|include|subfile)\{([^{}]+)\}$/.exec(src);
+      out.push(stamp(child ? mkSpecial('_include', child[1], child[2].trim()) : ertBlock(src)));
       return;
     }
   }

@@ -168,6 +168,11 @@
 .lyx-root .blk[data-type="_toc"] .toch { font: 600 12px var(--ui); color: var(--inset-label); margin-bottom: 4px; }
 .lyx-root .blk[data-type="_newpage"] { text-align: center; font: 11px var(--ui); color: var(--special); border-top: 1px dashed var(--special); padding-top: 2px; }
 .lyx-root .blk[data-type="_line"] { height: 1.2em; }
+.lyx-root .blk[data-type="_include"] { display: flex; align-items: center; gap: 8px; width: fit-content; max-width: 100%; white-space: normal; user-select: none; cursor: pointer; border: 1px solid var(--inset-line); border-radius: 2px; padding: 2px 4px 2px 8px; font: 12px var(--ui); }
+.lyx-root .blk[data-type="_include"] .inc-kind { color: var(--inset-label); }
+.lyx-root .blk[data-type="_include"] .inc-file { color: var(--special); font-family: var(--mono, monospace); overflow-wrap: anywhere; }
+.lyx-root .blk[data-type="_include"] .inc-open { font: inherit; color: var(--special); background: none; border: 1px solid transparent; border-radius: 2px; padding: 0 4px; cursor: pointer; }
+.lyx-root .blk[data-type="_include"] .inc-open:hover, .lyx-root .blk[data-type="_include"] .inc-open:focus-visible { border-color: var(--inset-line); }
 .lyx-root .blk[data-type="_line"] hr { border: 0; border-top: 1px solid var(--text); margin: .55em 0 0; }
 ::highlight(lyxfind) { background: #ffd54a; color: #000; }
 .lyx-root .mathbars { flex-shrink: 0; background: var(--chrome); border-top: 1px solid var(--chrome-line); }

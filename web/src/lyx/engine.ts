@@ -30,6 +30,10 @@ export interface LyxHost {
   showInPdf(line: number): void;
   /** Switch this file to the LaTeX source editor. */
   openSource(): void;
+  /** Open a child document (`\\input`, `\\include`, `\\subfile`); `line` is where the command is in this file, for coming back. */
+  openChild(file: string, cmd: string, line: number): void;
+  /** Return to the document this one was opened from (or that inputs it); false when there is none. */
+  backToParent(): boolean;
   /** Citation keys from the project's .bib files. */
   bibKeys(): { key: string; label: string }[];
   /** The project's .bib files (paths relative to this file, without .bib). */
@@ -1075,6 +1079,8 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
   ed.addEventListener('input', e => { if (e.target.tagName === 'MATH-FIELD') return; markDirty(); scheduleRefresh(); });
   // Ctrl/Cmd+click shows the spot in the PDF (as in the source editor)
   ed.addEventListener('click', e => {
+    const open = e.target.closest && e.target.closest('.inc-open');
+    if (open) { e.preventDefault(); openChild(open.closest('.blk')); return; }
     if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey || e.button !== 0) return;
     setTimeout(() => host.showInPdf(caretPosition().line), 0);
   });
@@ -1083,6 +1089,8 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     if (l) { e.preventDefault(); const ins = l.parentElement; ins.classList.toggle('collapsed'); if (ins.classList.contains('collapsed')) caretBeside(ins, true); markDirty(); }
   });
   ed.addEventListener('dblclick', e => {
+    const inc = e.target.closest && e.target.closest('.blk[data-type="_include"]');
+    if (inc) { e.preventDefault(); openChild(inc); return; }
     const el = e.target.closest && e.target.closest('.blk[data-type="_display"] .eqlabel');
     if (el) { e.preventDefault(); editEqLabelInline(el.closest('.blk')); return; }
     const a = e.target.closest && e.target.closest('.atom');
@@ -1608,14 +1616,15 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     withMath(() => ins.replaceWith(...nodes));
     refresh();
   }
-  function insertBlockAfter(el) {
-    const b = currentBlock();
+  /** `b`: the block to insert after (taken before a dialog moves the focus). */
+  function insertBlockAfter(el, b = currentBlock()) {
+    if (b && !b.isConnected) b = null;
     pushUndo();
     if (!b) ed.append(el);
     else if (isText(b) && isEmptyBlock(b) && !b.dataset.cont) b.replaceWith(el);
     else b.after(el);
     if (!el.nextElementSibling) el.after(mkBlock('Standard'));
-    refresh(); caretStart(el.nextElementSibling);
+    markDirty(); refresh(); caretStart(el.nextElementSibling);
   }
   function toggleAppendix() {
     const b = currentBlock(); if (!b) return;
@@ -2186,6 +2195,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
         if (t === '_display') out.push(...displayLyx(it));
         else if (t === '_toc') out.push('\\begin_inset CommandInset toc', 'LatexCommand tableofcontents', '', '\\end_inset', '');
         else if (t === '_newpage') out.push('\\begin_inset Newpage ' + (it.dataset.variant || 'newpage'), '\\end_inset', '');
+        else if (t === '_include') out.push('\\begin_inset CommandInset include', 'LatexCommand ' + (it.dataset.variant === 'include' ? 'include' : 'input'), `filename "${it.dataset.file}"`, '', '\\end_inset', '');
         else if (t === '_line') out.push('\\begin_inset CommandInset line', 'LatexCommand rule', 'offset "0.5ex"', 'width "100col%"', 'height "1pt"', '', '\\end_inset', '');
         else { const st = {}; lyxWalk(it, {}, out, st); syncFont({}, st, out); }
       }
@@ -2374,6 +2384,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     if (head === 'CommandInset href') return { node: mkAtom('Href', { name: kv('name'), target: kv('target') }) };
     if (head === 'CommandInset toc') return { block: mkSpecial('_toc') };
     if (head === 'CommandInset line') return { block: mkSpecial('_line') };
+    if (head === 'CommandInset include') { const c = kv('LatexCommand'); return { block: mkSpecial('_include', c === 'include' ? 'include' : 'input', kv('filename')) }; }
     if (head.startsWith('Newpage')) return { block: mkSpecial('_newpage', head.split(/\s+/)[1]) };
     if (head.startsWith('Newline')) return { node: mkLB(head.split(/\s+/)[1] || 'newline') };
     if (head.startsWith('space')) {
@@ -2494,6 +2505,7 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
       if (t === '_toc') { body.push('<nav class="toc">' + b.querySelector('.tocl').innerHTML + '</nav>'); continue; }
       if (t === '_newpage') { body.push('<div style="page-break-after:always"></div>'); continue; }
       if (t === '_line') { body.push('<hr>'); continue; }
+      if (t === '_include') continue;
       const c = inlineHtml(b, notes);
       const num = b.dataset.num ? `<span class="lbl">${esc(b.dataset.num)}</span> ` : '';
       const lvl = headLevel(t);
@@ -2878,19 +2890,34 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     enterAtom({ enter: tab }, true);
   }
   async function bibtexInsert() {
+    const at = currentBlock();
     const files = host.bibFiles();
     const res = await openDialog({ title: 'BibTeX Bibliography', body: `
       <label class="row"><span>Databases:</span><input type="text" name="db" value="${esc(files.join(','))}" placeholder="refs" spellcheck="false"></label>
       <label class="row"><span>Style:</span><input type="text" name="st" value="plain" spellcheck="false"></label>`, buttons: [['Cancel', ''], ['Insert', 'ok', true]] });
     if (res.value !== 'ok') return;
     const b = mkBlock('Standard', mkERT(`\\bibliographystyle{${res.form.st.value.trim() || 'plain'}}\n\\bibliography{${res.form.db.value.trim()}}`)); b.dataset.ert = '1';
-    insertBlockAfter(b);
+    insertBlockAfter(b, at);
   }
   async function includeInsert() {
+    const at = currentBlock();
     const name = await promptDialog('Child Document', 'File (\\input):', '');
-    if (!name) return;
-    const b = mkBlock('Standard', mkERT(`\\input{${name}}`)); b.dataset.ert = '1';
-    insertBlockAfter(b);
+    if (!name || !name.trim()) return;
+    insertBlockAfter(mkSpecial('_include', 'input', name.trim()), at);
+  }
+  /** The child document block at the caret, else the next one below it (else the first). */
+  function childTarget() {
+    const all = $$('.blk[data-type="_include"]', ed);
+    if (!all.length) return null;
+    const b = curBlock && curBlock.isConnected ? curBlock : currentBlock();
+    if (!b) return all[0];
+    if (b.dataset.type === '_include') return b;
+    return all.find(c => b.compareDocumentPosition(c) & Node.DOCUMENT_POSITION_FOLLOWING) || all[0];
+  }
+  function openChild(b) {
+    if (!b || !b.dataset.file) { status('No child document here'); return; }
+    setCurrent(b);
+    host.openChild(b.dataset.file, b.dataset.variant || 'input', exportDoc().lines.get(b) ?? 1);
   }
 
   /* =====================================================================
@@ -3222,6 +3249,8 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     'href-insert': { run: hrefInsert, en: () => inTextCtx() },
     'label-insert': { run: labelInsert, en: () => inTextCtx() || inDisplay() },
     'label-goto': { run: labelGoto },
+    'child-open': { run: () => openChild(childTarget()), en: () => !!ed.querySelector('.blk[data-type="_include"]') },
+    'child-back': { run: () => { if (!host.backToParent()) status('This document is not included from another one'); } },
     'reference-next': { run: () => nextInset('.atom[data-inset="Ref"]') },
     'note-next': { run: () => nextInset('.inset[data-inset="Note"]') },
     'date-insert': { run: () => insertPlain(new Date().toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' })), en: () => inTextCtx() || !!inIbody() },
@@ -3466,7 +3495,8 @@ export function createLyxEditor(root: HTMLElement, host: LyxHost): LyxEditor {
     insert_branches: [['Insert New Branch...|I', 'branch-add-insert']],
     insert_custom: [['@empty']],
     navigate: [['>Bookmarks|B', 'navigate_bookmarks'], ['Next Note|N', 'note-next'], ['Next Change|C', 'change-next'], ['Next Cross-Reference|R', 'reference-next'],
-      ['Go to Label|L', 'label-goto'], ['Forward Search|F', 'forward-search'], ['-'], ['@toc']],
+      ['Go to Label|L', 'label-goto'], ['Forward Search|F', 'forward-search'],
+      ['-'], ['Open Child Document|O', 'child-open'], ['Back to Parent Document|P', 'child-back'], ['-'], ['@toc']],
     navigate_bookmarks: [['Save Bookmark 1|S', 'bookmark-save 1'], ['Save Bookmark 2', 'bookmark-save 2'], ['Save Bookmark 3', 'bookmark-save 3'], ['Save Bookmark 4', 'bookmark-save 4'],
       ['Save Bookmark 5', 'bookmark-save 5'], ['Clear Bookmarks|C', 'bookmark-clear'], ['-'], ['Navigate Back|B', 'bookmark-goto 0'], ['@bookmarks']],
     document: [['>Change Tracking|C', 'document_change'], ['LaTeX Log|L', 'dialog-show latexlog'], ['Start Appendix Here|A', 'appendix'], ['-'],

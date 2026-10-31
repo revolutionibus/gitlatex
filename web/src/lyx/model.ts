@@ -4,7 +4,8 @@
  *
  * A document is a flat list of block elements (`div.blk`) inside the editor:
  * `data-type` is the paragraph layout (Standard, Section, Itemize, Theorem…) or
- * one of the special blocks (`_display` math, `_toc`, `_newpage`, `_line`);
+ * one of the special blocks (`_display` math, `_toc`, `_newpage`, `_line`,
+ * `_include` for an \input/\include child document);
  * `data-depth` nests lists and paragraphs. Inline content is text, formatting
  * elements (em, strong, span.ftt…), formulas (`span.mwrap > math-field`),
  * special characters (`.sc`), line breaks (`.lb`), insets with a body
@@ -35,7 +36,7 @@ export const THM: Record<string, 'plain' | 'definition' | 'remark' | 'proof'> = 
 };
 export const ENVS: Record<string, string> = { Quote: 'quote', Quotation: 'quotation', Verse: 'verse', 'LyX-Code': 'lyxcode', Abstract: 'abstract' };
 export const FRONT: Record<string, string> = { Title: 'title', Author: 'author', Date: 'date' };
-export const ATOMBLK = new Set(['_display', '_toc', '_newpage', '_line']);
+export const ATOMBLK = new Set(['_display', '_toc', '_newpage', '_line', '_include']);
 
 export const headBase = (t: string | undefined) => (t || '').replace(/\*$/, '');
 export const headLevel = (t: string | undefined): number | null => (headBase(t) in HEAD ? HEAD[headBase(t)] : null);
@@ -210,7 +211,8 @@ export function mkAtom(type: string, attrs: Record<string, string> = {}): HTMLSp
   return s;
 }
 
-export function mkSpecial(type: string, variant?: string): HTMLDivElement {
+/** `arg`: the file of an `_include` block (`variant` is its command: input, include or subfile). */
+export function mkSpecial(type: string, variant?: string, arg?: string): HTMLDivElement {
   const b = document.createElement('div');
   b.className = 'blk';
   b.dataset.type = type;
@@ -220,6 +222,22 @@ export function mkSpecial(type: string, variant?: string): HTMLDivElement {
     b.textContent = ({ newpage: 'New Page', pagebreak: 'Page Break', clearpage: 'Clear Page', cleardoublepage: 'Clear Double Page' } as Record<string, string>)[b.dataset.variant];
   } else if (type === '_line') b.innerHTML = '<hr>';
   else if (type === '_toc') b.innerHTML = '<div class="toch">Table of Contents</div><div class="tocl"></div>';
+  else if (type === '_include') {
+    b.dataset.variant = variant || 'input';
+    b.dataset.file = arg || '';
+    const kind = document.createElement('span');
+    kind.className = 'inc-kind';
+    kind.textContent = ({ input: 'Input', include: 'Include', subfile: 'Subfile' } as Record<string, string>)[b.dataset.variant] || b.dataset.variant;
+    const file = document.createElement('span');
+    file.className = 'inc-file';
+    file.textContent = b.dataset.file;
+    const open = document.createElement('button');
+    open.className = 'inc-open';
+    open.type = 'button';
+    open.title = 'Open the child document (or double-click)';
+    open.textContent = 'Open ↗';
+    b.append(kind, file, open);
+  }
   return b;
 }
 

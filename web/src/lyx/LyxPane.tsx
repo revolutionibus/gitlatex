@@ -13,12 +13,12 @@ import './lyx.css';
 import type { monaco } from '../editor/monaco';
 import { getModel } from '../editor/models';
 import { editorBridge } from '../editor/bridge';
-import { compile, forwardSearch, workspace } from '../state/actions';
-import { getState, setState as setAppState, toast, updateSettings, useStore } from '../state/store';
+import { compile, forwardSearch, openFile, workspace } from '../state/actions';
+import { getState, openDialog, setState as setAppState, toast, updateSettings, useStore } from '../state/store';
 import { cleanField, mergeBib, parseBib } from '../latex/bib';
 import { loadedPackages } from '../latex/analysis';
 import { zotero, type ZoteroSource } from '../storage/server';
-import { dirname, extname, isImagePath, relativePath } from '../utils/paths';
+import { basename, dirname, extname, isImagePath, relativePath } from '../utils/paths';
 import { Spinner } from '../components/ui';
 import { createLyxEditor, type LyxEditor, type LyxHost } from './engine';
 import { graphicsPaths } from './tex-import';
@@ -51,6 +51,48 @@ function resolve(dir: string, p: string): string | null {
     } else out.push(seg);
   }
   return out.join('/');
+}
+
+/** The project file a child document command names (TeX looks relative to the main file; \\subfile, to the file itself), or null. */
+function childPath(file: string, cmd: string, from: string): string | null {
+  const ws = workspace();
+  if (!ws) return null;
+  const main = getState().project?.mainFile ?? from;
+  for (const dir of new Set(cmd === 'subfile' ? [dirname(from), dirname(main)] : [dirname(main), dirname(from)])) {
+    const p = resolve(dir, file);
+    if (p == null) continue;
+    // \include always adds .tex; \input tries name.tex first, then the name as written
+    for (const c of cmd === 'include' ? [`${p}.tex`] : extname(p) === 'tex' ? [p] : [`${p}.tex`, p]) if (ws.get(c)) return c;
+  }
+  return null;
+}
+
+/** How each open child document was reached: the document it was opened from and the line of its \\input there. */
+const trail: { parent: string; child: string; line: number }[] = [];
+
+/** The document `path` was opened from, else one that inputs it (the main file first). */
+function parentOf(path: string): { parent: string; line: number } | null {
+  for (let i = trail.length - 1; i >= 0; i--) if (trail[i].child === path && workspace()?.get(trail[i].parent)) return trail[i];
+  const main = getState().project?.mainFile;
+  const files = (workspace()?.textFiles('.tex') ?? []).filter((f) => f.path !== path).sort((a, b) => +(b.path === main) - +(a.path === main));
+  for (const f of files) {
+    for (const m of f.text.matchAll(/\\(input|include|subfile)\s*\{([^{}]+)\}/g)) {
+      const before = f.text.slice(0, m.index);
+      if (/%[^\n]*$/.test(before.replace(/\\%/g, ''))) continue; // commented out
+      if (childPath(m[2].trim(), m[1], f.path) === path) return { parent: f.path, line: before.split('\n').length };
+    }
+  }
+  return null;
+}
+
+/** Go back to the document `path` was opened from (or that inputs it). */
+function backToParent(path: string): boolean {
+  const p = parentOf(path);
+  if (!p) return false;
+  const i = trail.findIndex((t) => t.child === path && t.parent === p.parent);
+  if (i >= 0) trail.length = i;
+  openFile(p.parent, p.line);
+  return true;
 }
 
 const IMAGE_TYPES: Record<string, string> = { png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', svg: 'image/svg+xml', bmp: 'image/bmp' };
@@ -166,6 +208,38 @@ export function LyxPane({ path }: { path: string }) {
       openSource: () => {
         write();
         updateSettings({ editorStyle: 'default' });
+      },
+      openChild: (file, cmd, line) => {
+        write();
+        const go = (child: string) => {
+          // opening it again from here replaces the older way back
+          for (let i = trail.length - 1; i >= 0; i--) if (trail[i].child === child) trail.splice(i, 1);
+          if (child !== path) trail.push({ parent: path, child, line });
+          openFile(child);
+        };
+        const found = childPath(file, cmd, path);
+        if (found) return go(found);
+        const ws = workspace();
+        const p = resolve(dirname(cmd === 'subfile' ? path : (getState().project?.mainFile ?? path)), file);
+        if (!ws || p == null) {
+          toast({ kind: 'error', title: 'Child document not found', message: file });
+          return;
+        }
+        const target = cmd === 'include' || !extname(p) ? `${p}.tex` : p;
+        openDialog({
+          type: 'confirm',
+          title: 'Create child document?',
+          message: `${target} does not exist yet. Create it as an empty file and open it?`,
+          confirm: 'Create',
+          onConfirm: () => {
+            ws.writeFile(target, '');
+            go(target);
+          },
+        });
+      },
+      backToParent: () => {
+        write();
+        return backToParent(path);
       },
       bibKeys: () => {
         const out: { key: string; label: string }[] = [];
@@ -310,26 +384,39 @@ export function LyxPane({ path }: { path: string }) {
     editorRef.current?.reveal(reveal.line, reveal.column);
   }, [reveal, path, state]);
 
+  // a child document (\input from another file): the way back
+  const parent = state === 'ready' ? parentOf(path) : null;
+
   return (
-    <div className="relative min-h-0 flex-1">
-      <div ref={hostRef} className="absolute inset-0" data-testid="lyx-editor" />
-      {state !== 'ready' && (
-        <div className="absolute inset-0 flex items-center justify-center bg-panel text-sm text-muted">
-          {state === 'loading' ? (
-            <span className="flex items-center gap-2">
-              <Spinner /> Loading the LyX-style editor…
-            </span>
-          ) : (
-            <span className="max-w-md text-center">
-              The LyX-style editor could not start: {error}
-              <br />
-              <button className="mt-2 text-accent hover:underline" onClick={() => updateSettings({ editorStyle: 'default' })}>
-                Use the LaTeX source editor
-              </button>
-            </span>
-          )}
+    <div className="flex min-h-0 flex-1 flex-col">
+      {parent && (
+        <div className="flex shrink-0 items-center gap-2 border-b border-line bg-panel px-3 py-1 text-xs text-muted">
+          <button className="text-accent hover:underline" title={`Back to ${parent.parent}, line ${parent.line}`} onClick={() => backToParent(path)} data-testid="lyx-back-to-parent">
+            ← Back to {basename(parent.parent)}
+          </button>
+          <span className="truncate">Child document of {parent.parent}</span>
         </div>
       )}
+      <div className="relative min-h-0 flex-1">
+        <div ref={hostRef} className="absolute inset-0" data-testid="lyx-editor" />
+        {state !== 'ready' && (
+          <div className="absolute inset-0 flex items-center justify-center bg-panel text-sm text-muted">
+            {state === 'loading' ? (
+              <span className="flex items-center gap-2">
+                <Spinner /> Loading the LyX-style editor…
+              </span>
+            ) : (
+              <span className="max-w-md text-center">
+                The LyX-style editor could not start: {error}
+                <br />
+                <button className="mt-2 text-accent hover:underline" onClick={() => updateSettings({ editorStyle: 'default' })}>
+                  Use the LaTeX source editor
+                </button>
+              </span>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
