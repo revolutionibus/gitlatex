@@ -17,6 +17,8 @@ let pendingSlashRange: monaco.IRange | null = null;
 export const editorBridge = {
   set(e: Editor | null) {
     editor = e;
+    // Read by the "Sync to Overleaf" browser extension (text + model URI = open file).
+    (window as Window & { __gitlatexEditor?: Editor | null }).__gitlatexEditor = e;
   },
   get(): Editor | null {
     return editor;
