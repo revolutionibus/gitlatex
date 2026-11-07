@@ -73,6 +73,8 @@ export interface Settings {
   beginnerMode: boolean;
   slashCommands: boolean;
   mathPreview: boolean;
+  /** Show formulas rendered in the editor; the cursor's lines keep the raw TeX. */
+  concealTex: boolean;
   formatBar: boolean;
   engineUrl: string;
   shelfUrl: string;
@@ -98,6 +100,7 @@ export const DEFAULT_SETTINGS: Settings = {
   beginnerMode: true,
   slashCommands: true,
   mathPreview: true,
+  concealTex: false,
   formatBar: true,
   engineUrl: '',
   shelfUrl: '',

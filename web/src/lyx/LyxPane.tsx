@@ -22,23 +22,7 @@ import { basename, dirname, extname, isImagePath, relativePath } from '../utils/
 import { Spinner } from '../components/ui';
 import { createLyxEditor, type LyxEditor, type LyxHost } from './engine';
 import { graphicsPaths } from './tex-import';
-
-type MathLive = typeof import('mathlive');
-let mathlive: Promise<MathLive> | null = null;
-
-/** MathLive (≈1 MB) loads the first time a file is opened in the LyX style. Its fonts are bundled. */
-function loadMathLive(): Promise<MathLive> {
-  mathlive ??= (async () => {
-    await import('mathlive/fonts.css');
-    const ML = await import('mathlive');
-    ML.MathfieldElement.fontsDirectory = null;
-    ML.MathfieldElement.soundsDirectory = null;
-    ML.MathfieldElement.plonkSound = null;
-    return ML;
-  })();
-  mathlive.catch(() => (mathlive = null));
-  return mathlive;
-}
+import { loadMathLive } from '../editor/mathlive';
 
 /** Resolve `p` against `dir`, allowing `..` (null when it leaves the project). */
 function resolve(dir: string, p: string): string | null {

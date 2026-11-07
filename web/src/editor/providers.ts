@@ -4,6 +4,7 @@
  * hover cards, go-to-definition, document symbols, folding and quick fixes.
  */
 import { monaco } from './monaco';
+import { findMath } from './math-spans';
 import { COMMANDS, ENVIRONMENTS } from '../latex/catalog';
 import { labels, loadedPackages, outline, userMacros } from '../latex/analysis';
 import { parseBib, formatEntry, type BibEntry } from '../latex/bib';
@@ -500,26 +501,7 @@ export function mathAt(model: monaco.editor.ITextModel, position: monaco.Positio
   const to = Math.min(text.length, offset + 3000);
   const win = text.slice(from, to);
   const rel = offset - from;
-  const candidates: [RegExp, boolean][] = [
-    [/\\begin\{(equation|align|gather|multline|flalign|displaymath|math|eqnarray)(\*?)\}([\s\S]*?)\\end\{\1\2\}/g, true],
-    [/\\\[([\s\S]*?)\\\]/g, true],
-    [/\$\$([\s\S]*?)\$\$/g, true],
-    [/\\\(([\s\S]*?)\\\)/g, false],
-    [/(?<![\\$])\$(?!\$)((?:\\.|[^$\\])+?)\$/g, false],
-  ];
-  for (const [re, display] of candidates) {
-    re.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = re.exec(win))) {
-      if (rel < m.index || rel > m.index + m[0].length) continue;
-      const env = m.length > 3 ? m[1] : null;
-      let tex = (env ? m[3] : m[1]).replace(/\\label\{[^}]*\}/g, '').replace(/(^|[^\\])%.*$/gm, '$1');
-      if (env && /^(align|flalign|eqnarray)$/.test(env)) tex = `\\begin{aligned}${tex}\\end{aligned}`;
-      if (env === 'gather') tex = `\\begin{gathered}${tex}\\end{gathered}`;
-      if (!tex.trim()) return null;
-      const endLine = model.getPositionAt(from + m.index + m[0].length).lineNumber;
-      return { tex: tex.trim(), display, endLine };
-    }
-  }
-  return null;
+  const m = findMath(win).find((s) => rel >= s.start && rel <= s.end);
+  if (!m?.tex) return null;
+  return { tex: m.tex, display: m.display, endLine: model.getPositionAt(from + m.end).lineNumber };
 }

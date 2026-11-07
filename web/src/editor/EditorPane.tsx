@@ -17,6 +17,7 @@ import { SlashMenu, MathPreview } from './SlashMenu';
 import { filterSlash, SLASH_COMMANDS, type SlashCommand } from './slash-commands';
 import { useStore, getState, setState, openDialog, promptText, toast, updateSettings } from '../state/store';
 import { installSpellCheck, setSpellCheckEnabled } from './spell';
+import { installConceal, setConcealEnabled } from './conceal';
 import { installSnippets } from './snippets';
 import { installReview } from './review';
 import { installConflictTools } from './conflicts';
@@ -163,6 +164,7 @@ export function EditorPane() {
     });
 
     const spell = installSpellCheck(editor, s.spellCheck);
+    const conceal = installConceal(editor, s.concealTex);
     const review = installReview(editor);
     const conflictTools = installConflictTools(editor, () => getState().scm?.sides);
     const collab = attachCollabEditor(editor);
@@ -310,7 +312,7 @@ export function EditorPane() {
       mathTimer = setTimeout(() => {
         const model = editor.getModel();
         const pos = editor.getPosition();
-        if (!getState().settings.mathPreview || !model || !pos || model.getLanguageId() !== 'latex' || slashRef.current) {
+        if (!getState().settings.mathPreview || getState().settings.concealTex || !model || !pos || model.getLanguageId() !== 'latex' || slashRef.current) {
           setMath(null);
           return;
         }
@@ -330,6 +332,7 @@ export function EditorPane() {
     return () => {
       syncClickSub.dispose();
       spell.dispose();
+      conceal.dispose();
       review.dispose();
       conflictTools.dispose();
       collab.dispose();
@@ -371,6 +374,7 @@ export function EditorPane() {
   }, [settings.vim]);
 
   useEffect(() => setSpellCheckEnabled(settings.spellCheck), [settings.spellCheck]);
+  useEffect(() => setConcealEnabled(settings.concealTex), [settings.concealTex]);
 
   // ---- switch model when the active file changes -----------------------------------------
   const prevPath = useRef<string | null>(null);
@@ -496,6 +500,16 @@ export function EditorPane() {
               {label}
             </button>
           ))}
+          {settings.editorStyle !== 'lyx' && (
+            <button
+              title={`Show formulas rendered and edit them in a math box (${modKey}+M inline, ${modKey}+Shift+M display)`}
+              aria-pressed={settings.concealTex}
+              onClick={() => updateSettings({ concealTex: !settings.concealTex })}
+              className={clsx('ml-1 rounded px-2 py-0.5 text-[11.5px]', settings.concealTex ? 'bg-accent/15 font-medium text-fg' : 'text-muted hover:bg-hover hover:text-fg')}
+            >
+              Conceal TeX
+            </button>
+          )}
         </div>
       )}
       </div>
