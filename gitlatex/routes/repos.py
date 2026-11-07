@@ -6,6 +6,7 @@ import shutil
 import stat
 import subprocess
 import sys
+from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify
 
@@ -13,7 +14,7 @@ from gitlatex import state
 from gitlatex.services import comments, paths
 from gitlatex.services.git_backend import Repo, git_rmtree
 from gitlatex.http import _json
-from gitlatex.services.paths import count_files_in_dir, parse_owner_from_remote_url
+from gitlatex.services.paths import project_file_stats, parse_owner_from_remote_url
 
 bp = Blueprint("repos", __name__)
 
@@ -36,10 +37,9 @@ def list_repos():
         created_at = None
         created_by = None
         try:
-            stat = os.stat(full)
-            from datetime import datetime
-            last_modified = datetime.fromtimestamp(stat.st_mtime).isoformat() + "Z"
-            file_count = count_files_in_dir(full)
+            file_count, modified = project_file_stats(full)
+            if modified is not None:
+                last_modified = datetime.fromtimestamp(modified, timezone.utc).isoformat().replace("+00:00", "Z")
         except OSError:
             pass
         has_git = False
@@ -49,16 +49,19 @@ def list_repos():
             try:
                 repo = Repo(full)
                 try:
-                    origin = repo.remotes.origin
-                    remote_url = next(origin.urls, None)
-                    owner = parse_owner_from_remote_url(remote_url) if remote_url else None
-                except (AttributeError, StopIteration):
+                    # Prefer origin, but a repo whose only remote has another name is still remote.
+                    remote = next((r for r in repo.remotes if r.name == "origin"), None) or next(iter(repo.remotes), None)
+                    if remote is not None:
+                        remote_url = next(remote.urls, None)
+                        owner = parse_owner_from_remote_url(remote_url) if remote_url else None
+                except Exception:
                     pass
                 try:
                     commits = list(repo.iter_commits(repo.head, reverse=True, max_count=1))
                     if commits:
                         c = commits[0]
-                        created_at = c.committed_datetime.isoformat() + "Z" if c.committed_datetime else None
+                        created_at = (c.committed_datetime.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+                                      if c.committed_datetime else None)
                         created_by = c.author.name if c.author else None
                 except Exception:
                     pass

@@ -116,7 +116,7 @@ export interface LocalCompileResult {
   success?: boolean;
   error?: string;
   log?: string;
-  /** `message`: why a bibliography tool failed (e.g. biber and biblatex versions that do not match). */
+  /** `message`: why a bibliography tool failed (biber and biblatex versions that do not match…). */
   steps?: { tool: string; missing?: boolean; exitCode?: number; message?: string }[];
   engine?: string;
 }
@@ -227,26 +227,33 @@ export const scm = {
   branches: () => get<{ local: string[]; remote: string[] }>('/api/scm/branches'),
   checkout: (name: string, create = false) => post<ScmResult>('/api/scm/checkout', { name, create }),
   publishOptions: () => get<{ gh: boolean }>('/api/scm/publish-options'),
-  githubUser: () => get<{ login: string | null }>('/api/scm/github-user'),
   publish: (opts: { url?: string; name?: string; private?: boolean }) => post<ScmResult>('/api/scm/publish', opts),
   diff: (path: string, staged: boolean) => get<FileDiff>(`/api/scm/diff${qs({ path, staged: staged ? '1' : '0' })}`),
 };
 
 // ---- Zotero (gitlatex/routes/zotero.py) ------------------------------------------------
 
-export type ZoteroSource = 'betterBibtex' | 'localApi';
+/** The desktop app (Better BibTeX or its local API), or zotero.org with an API key. */
+export type ZoteroSource = 'betterBibtex' | 'localApi' | 'web';
 
 export interface ZoteroStatus {
+  /** The desktop app answers on this machine. */
   running: boolean;
   betterBibtex: boolean;
   localApi: boolean;
+  /** zotero.org accepted the API key. */
+  web: boolean;
+  /** The zotero.org account the key belongs to. */
+  username: string | null;
   /** Why Zotero cannot be used, when it cannot. */
   message: string | null;
 }
 
 export interface ZoteroItem {
-  /** What export() takes: a citation key with Better BibTeX, else a Zotero item key. */
+  /** What export() takes: a citation key with Better BibTeX, else `<library>:<item key>` (user:ABCD1234, group/7:ABCD1234). */
   id: string;
+  /** "My Library" or the group library's name; absent with Better BibTeX. */
+  library?: string;
   /** The citation key, when known before export. */
   key: string | null;
   title: string;
@@ -256,8 +263,27 @@ export interface ZoteroItem {
   where: string;
 }
 
+/** The zotero.org API key travels in a header, never in the URL. */
+const zoteroHeaders = (key: string): Record<string, string> => (key ? { 'X-Zotero-Key': key } : {});
+
+/** `key`: the zotero.org API key ('' for none); the server only uses it when the app cannot answer. */
 export const zotero = {
-  status: () => get<ZoteroStatus>('/api/zotero/status'),
-  search: (q: string) => get<{ source: ZoteroSource; items: ZoteroItem[] }>('/api/zotero/search' + qs({ q })),
-  export: (ids: string[], source: ZoteroSource, biblatex: boolean) => post<{ bibtex: string }>('/api/zotero/export', { ids, source, biblatex }),
+  status: (key = '') => request<ZoteroStatus>('/api/zotero/status', { headers: zoteroHeaders(key) }),
+  search: (q: string, key = '') => request<{ source: ZoteroSource; items: ZoteroItem[] }>('/api/zotero/search' + qs({ q }), { headers: zoteroHeaders(key) }),
+  export: (ids: string[], source: ZoteroSource, biblatex: boolean, key = '') =>
+    request<{ bibtex: string }>('/api/zotero/export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...zoteroHeaders(key) },
+      body: JSON.stringify({ ids, source, biblatex }),
+    }),
 };
+
+/** An EPS figure of the project converted to PDF by the server (epstopdf / Ghostscript); null when it has no converter. */
+export async function epsPreview(path: string): Promise<Uint8Array | null> {
+  try {
+    const res = await fetch('/api/figure/preview', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path }) });
+    return res.ok && res.headers.get('Content-Type')?.includes('pdf') ? new Uint8Array(await res.arrayBuffer()) : null;
+  } catch {
+    return null;
+  }
+}

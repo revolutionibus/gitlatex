@@ -4,7 +4,6 @@
  * hover cards, go-to-definition, document symbols, folding and quick fixes.
  */
 import { monaco } from './monaco';
-import { findMath } from './math-spans';
 import { COMMANDS, ENVIRONMENTS } from '../latex/catalog';
 import { labels, loadedPackages, outline, userMacros } from '../latex/analysis';
 import { parseBib, formatEntry, type BibEntry } from '../latex/bib';
@@ -13,6 +12,7 @@ import type { Workspace } from '../state/workspace';
 import type { Diagnostic } from '../types';
 import { dirname, extname, isImagePath, relativePath, stripExt } from '../utils/paths';
 import type { QuickFix } from '../latex/explain';
+import { findMathZones, maskComments } from './vimtex';
 
 export interface ProviderContext {
   workspace(): Workspace | null;
@@ -25,7 +25,7 @@ export interface ProviderContext {
 }
 
 const pathOf = (model: monaco.editor.ITextModel) => model.uri.path.slice(1);
-export const CIT = /\\(?:[a-zA-Z]*cite[a-zA-Z]*|nocite)\*?(?:\[[^\]]*\]){0,2}\{([^}]*)$/;
+export const CIT =/\\(?:[a-zA-Z]*cite[a-zA-Z]*|nocite)\*?(?:\[[^\]]*\]){0,2}\{([^}]*)$/;
 const REF = /\\(?:ref|eqref|pageref|autoref|nameref|[cC]ref|vref|labelcref)\*?\{([^}]*)$/;
 const GFX = /\\includegraphics\*?(?:\[[^\]]*\])?\{([^}]*)$/;
 const INPUT = /\\(input|include|subfile|lstinputlisting(?:\[[^\]]*\])?)\{([^}]*)$/;
@@ -116,12 +116,12 @@ export function registerProviders(ctx: ProviderContext) {
     },
   });
 
-  const addPackageCommand = monaco.editor.registerCommand('texbrowser.ensurePackage', (_accessor, pkg: string) => {
+  const addPackageCommand = monaco.editor.registerCommand('gitlatex.ensurePackage', (_accessor, pkg: string) => {
     ctx.ensurePackage(pkg);
   });
   void addPackageCommand;
-  monaco.editor.registerCommand('texbrowser.quickFix', (_accessor, fix: QuickFix) => ctx.applyQuickFix(fix));
-  monaco.editor.registerCommand('texbrowser.searchZotero', (_accessor, query: string) => ctx.searchZotero(query));
+  monaco.editor.registerCommand('gitlatex.quickFix', (_accessor, fix: QuickFix) => ctx.applyQuickFix(fix));
+  monaco.editor.registerCommand('gitlatex.searchZotero', (_accessor, query: string) => ctx.searchZotero(query));
 
   monaco.languages.registerCompletionItemProvider('latex', {
     triggerCharacters: ['\\', '{', ','],
@@ -152,9 +152,9 @@ export function registerProviders(ctx: ProviderContext) {
               kind: K.Event,
               insertText: '',
               filterText: typed,
-              sortText: '\uffff',
+              sortText: '￿',
               detail: 'Import from your Zotero library',
-              command: { id: 'texbrowser.searchZotero', title: 'Search Zotero', arguments: [typed] },
+              command: { id: 'gitlatex.searchZotero', title: 'Search Zotero', arguments: [typed] },
               range: wordRangeAfter(position, typed.length),
             },
           ],
@@ -233,7 +233,7 @@ export function registerProviders(ctx: ProviderContext) {
           insertText: `\\begin{${name}}${args}\n${indent}\t${body.replace(/\n/g, `\n${indent}\t`)}\n${indent}\\end{${name}}`,
           insertTextRules: monaco.languages.CompletionItemInsertTextRule.InsertAsSnippet,
           range,
-          command: pkg ? { id: 'texbrowser.ensurePackage', title: 'add package', arguments: [pkg] } : undefined,
+          command: pkg ? { id: 'gitlatex.ensurePackage', title: 'add package', arguments: [pkg] } : undefined,
         });
         return {
           suggestions: [
@@ -280,7 +280,7 @@ export function registerProviders(ctx: ProviderContext) {
             detail: needs ? `${c.doc} (adds \\usepackage{${needs}})` : c.doc,
             range,
             sortText: '1' + c.name,
-            command: needs ? { id: 'texbrowser.ensurePackage', title: 'add package', arguments: [needs] } : undefined,
+            command: needs ? { id: 'gitlatex.ensurePackage', title: 'add package', arguments: [needs] } : undefined,
           });
         }
         return { suggestions: items };
@@ -443,7 +443,7 @@ export function registerProviders(ctx: ProviderContext) {
             title: fix.label,
             kind: 'quickfix',
             isPreferred: true,
-            command: { id: 'texbrowser.quickFix', title: fix.label, arguments: [fix] },
+            command: { id: 'gitlatex.quickFix', title: fix.label, arguments: [fix] },
           });
         }
       }
@@ -496,12 +496,49 @@ export function registerProviders(ctx: ProviderContext) {
 /** Math under the cursor: returns the TeX source and whether it is display math. */
 export function mathAt(model: monaco.editor.ITextModel, position: monaco.Position): { tex: string; display: boolean; endLine: number } | null {
   const offset = model.getOffsetAt(position);
-  const text = model.getValue();
-  const from = Math.max(0, offset - 3000);
-  const to = Math.min(text.length, offset + 3000);
-  const win = text.slice(from, to);
-  const rel = offset - from;
-  const m = findMath(win).find((s) => rel >= s.start && rel <= s.end);
-  if (!m?.tex) return null;
-  return { tex: m.tex, display: m.display, endLine: model.getPositionAt(from + m.end).lineNumber };
+  // Scan the whole file in order, so every $ pairs with its real partner; comments and verbatim are blanked first.
+  const masked = maskVerbatim(maskComments(model.getValue()));
+  let zone: MathZone | null = null;
+  for (const z of findMathZones(masked) as MathZone[]) {
+    // Strictly inside: the cursor right after the closing delimiter is outside.
+    if (z.openStart < offset && offset < z.closeEnd && (!zone || z.closeEnd - z.openStart > zone.closeEnd - zone.openStart)) zone = z;
+  }
+  if (!zone) return null;
+  let tex = masked.slice(zone.openEnd, zone.closeStart).replace(/\\label\{[^}]*\}|\\nonumber\b|\\notag\b/g, '');
+  if (!tex.trim()) return null;
+  const env = zone.kind === 'env' ? zone.env!.name.replace(/\*$/, '') : null;
+  const wrap = env ? MATH_ENV_WRAP[env] : undefined;
+  if (wrap) tex = `\\begin{${wrap}}${tex}\\end{${wrap}}`;
+  const display = zone.kind === 'env' ? env !== 'math' : zone.kind === '$$' || zone.kind === '\\[';
+  return { tex: tex.trim(), display, endLine: model.getPositionAt(zone.closeEnd).lineNumber };
+}
+
+interface MathZone {
+  kind: '$' | '$$' | '\\(' | '\\[' | 'env';
+  env?: { name: string };
+  openStart: number;
+  openEnd: number;
+  closeStart: number;
+  closeEnd: number;
+}
+
+/** KaTeX has no numbered display environments, so their bodies render in the matching inner one. */
+const MATH_ENV_WRAP: Record<string, string> = {
+  align: 'aligned',
+  flalign: 'aligned',
+  eqnarray: 'aligned',
+  alignat: 'alignedat',
+  gather: 'gathered',
+  multline: 'gathered',
+  split: 'split',
+  aligned: 'aligned',
+  gathered: 'gathered',
+};
+
+/** Blanks \verb and verbatim-like environments (keeping offsets and newlines), so a $ inside them is not math. */
+function maskVerbatim(text: string): string {
+  const blank = (s: string) => s.replace(/[^\n]/g, ' ');
+  return text
+    .replace(/\\begin\{(verbatim|Verbatim|lstlisting|minted|comment)(\*?)\}[\s\S]*?\\end\{\1\2\}/g, blank)
+    .replace(/\\verb\*?([^\sa-zA-Z*])[^\n]*?\1/g, blank);
 }

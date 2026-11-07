@@ -9,6 +9,9 @@
  *   M        mark the selected line, or the line at the top of the view
  *   B        go back to where the last link / Show in PDF jump started
  *   C        go to the previous mark (Shift+C: the next one)
+ *
+ * After a compile the view moves to the cursor's page and briefly highlights
+ * what changed there; a \ref to a figure lands on the whole figure.
  */
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { BookmarkPlus } from 'lucide-react';
@@ -18,6 +21,8 @@ import * as pdfjsViewer from 'pdfjs-dist/legacy/web/pdf_viewer.mjs';
 import 'pdfjs-dist/legacy/web/pdf_viewer.css';
 import { getState } from '../state/store';
 import type { SyncRect } from '../latex/synctex';
+import { changedPageTiles, type ChangeTile } from './changes';
+import { figureTopAbove, graphicsBoxes } from './link-target';
 
 export type Zoom = 'width' | 'page' | number;
 
@@ -76,6 +81,51 @@ function marksStore() {
   };
 }
 
+/** Room left above a link's target (CSS px), so it is not flush with the edge. */
+const LANDING_MARGIN = 24;
+/** Give up on finding a figure above the target after this long, and just jump. */
+const LANDING_TIMEOUT = 400;
+
+/**
+ * For an XYZ destination (what hyperref writes), where the view should
+ * start: the figure right above the target if there is one, else the target.
+ * Null for anything else, which pdf.js then handles as usual.
+ */
+async function landingFor(pdfViewer: pdfjsViewer.PDFViewer, dest: string | unknown[]) {
+  const doc = pdfViewer.pdfDocument;
+  if (!doc) return null;
+  const explicit = typeof dest === 'string' ? await doc.getDestination(dest) : dest;
+  if (!Array.isArray(explicit) || (explicit[1] as { name?: string })?.name !== 'XYZ' || typeof explicit[3] !== 'number') return null;
+  const ref = explicit[0];
+  const pageIndex = Number.isInteger(ref) ? (ref as number) : ref && typeof ref === 'object' ? await doc.getPageIndex(ref as never) : null;
+  if (pageIndex === null) return null;
+  const targetY = explicit[3] as number;
+  const page = await doc.getPage(pageIndex + 1);
+  const opList = await Promise.race([page.getOperatorList(), new Promise<null>((r) => setTimeout(() => r(null), LANDING_TIMEOUT))]);
+  const figureTop = opList ? figureTopAbove(graphicsBoxes(opList, pdfjs.OPS), targetY, page.view[3] - page.view[1]) : null;
+  const x = typeof explicit[2] === 'number' ? explicit[2] : 0;
+  return (el: HTMLElement) => {
+    const pageView = pdfViewer.getPageView(pageIndex);
+    if (!pageView?.div) return;
+    const [, top] = pageView.viewport.convertToViewportPoint(x, figureTop ?? targetY);
+    el.scrollTop = pageOrigin(el, pageView.div).top + top - LANDING_MARGIN;
+  };
+}
+
+/**
+ * An overlay on a page, positioned in percent so it fits any zoom. pdf.js
+ * clears foreign children when it re-lays a page out (on zoom), which suits
+ * these short-lived highlights.
+ */
+function addOverlay(page: HTMLElement, className: string, box: { left: string; top: string; width: string; height: string }) {
+  const el = document.createElement('div');
+  el.className = `pointer-events-none absolute z-10 ${className}`;
+  el.setAttribute('aria-hidden', 'true');
+  Object.assign(el.style, box);
+  page.appendChild(el);
+  return el;
+}
+
 /** Top-left of a page's content, in the scroller's scroll coordinates. */
 function pageOrigin(scroller: HTMLElement, div: HTMLElement) {
   const page = div.getBoundingClientRect();
@@ -129,6 +179,8 @@ export const PdfViewer = forwardRef<
   {
     data: Uint8Array;
     version: number;
+    /** The page the cursor is on; after a compile the view moves there. */
+    cursorPage: number | null;
     zoom: Zoom;
     onZoomChange: (z: Zoom) => void;
     onPageChange: (page: number, total: number) => void;
@@ -137,7 +189,7 @@ export const PdfViewer = forwardRef<
     target: { rects: SyncRect[]; nonce: number } | null;
     dark: boolean;
   }
->(function PdfViewer({ data, version, zoom, onZoomChange, onPageChange, onScaleChange, onInverseSearch, target, dark }, ref) {
+>(function PdfViewer({ data, version, cursorPage, zoom, onZoomChange, onPageChange, onScaleChange, onInverseSearch, target, dark }, ref) {
   const wrapper = useRef<HTMLDivElement>(null);
   const scroller = useRef<HTMLDivElement>(null);
   const jumpBar = useRef<HTMLDivElement>(null);
@@ -160,8 +212,8 @@ export const PdfViewer = forwardRef<
   const [error, setError] = useState<string | null>(null);
   const [markAt, setMarkAt] = useState<{ left: number; top: number } | null>(null);
   // pdf.js events outlive a render; they read the current props from here.
-  const props = useRef({ zoom, onPageChange, onScaleChange });
-  props.current = { zoom, onPageChange, onScaleChange };
+  const props = useRef({ zoom, cursorPage, onPageChange, onScaleChange });
+  props.current = { zoom, cursorPage, onPageChange, onScaleChange };
 
   // ---- create the viewer (once: it keeps listeners on the DOM below) ---------------------------
   useEffect(() => {
@@ -172,6 +224,7 @@ export const PdfViewer = forwardRef<
       container: scroller.current,
       eventBus,
       linkService,
+      removePageBorders: true,
       // The annotation editor listens for paste and drop on the whole page,
       // which would steal them from the editor.
       annotationEditorMode: pdfjs.AnnotationEditorType.DISABLE,
@@ -191,6 +244,15 @@ export const PdfViewer = forwardRef<
       eventBus,
       pdfViewer,
     );
+    // Land links with some room above, and a \ref to a figure (which points at
+    // its caption) on the whole figure. Worked out before the jump, so the
+    // view moves once.
+    const goToDestination = linkService.goToDestination.bind(linkService);
+    linkService.goToDestination = async (dest) => {
+      const land = await landingFor(pdfViewer, dest).catch(() => null);
+      await goToDestination(dest);
+      if (land && scroller.current) land(scroller.current);
+    };
     // Their labels are data-l10n-ids; the viewer's l10n has the English text.
     void pdfViewer.l10n?.translate(jumpBar.current);
     void pdfViewer.l10n?.translate(panel.current);
@@ -239,7 +301,20 @@ export const PdfViewer = forwardRef<
     let cancelled = false;
     const task = pdfjs.getDocument({ data: data.slice() });
     task.promise.then(
-      (doc) => {
+      async (doc) => {
+        if (cancelled) return void task.destroy();
+        const oldDoc = v.pdfViewer.pdfDocument;
+        const cursor = props.current.cursorPage;
+        // What changed on the cursor's page, compared before the old document goes.
+        const changePage = oldDoc && cursor ? Math.min(cursor, doc.numPages) : null;
+        let tiles: ChangeTile[] = [];
+        if (oldDoc && changePage && changePage <= oldDoc.numPages) {
+          try {
+            tiles = await changedPageTiles(await oldDoc.getPage(changePage), await doc.getPage(changePage));
+          } catch {
+            // A comparison failure must not prevent PDF display.
+          }
+        }
         if (cancelled) return void task.destroy();
         const oldTask = taskRef.current;
         // A rebuild keeps the reader where they were, without a blank flash.
@@ -255,7 +330,9 @@ export const PdfViewer = forwardRef<
             shownVersion.current = version;
             const { pdfViewer } = v;
             applyZoom(pdfViewer, props.current.zoom);
-            if (keep) {
+            // After a compile, show the page being edited; otherwise stay put.
+            if (cursor) pdfViewer.scrollPageIntoView({ pageNumber: Math.min(cursor, pdfViewer.pagesCount) });
+            else if (keep) {
               pdfViewer.scrollPageIntoView({
                 pageNumber: Math.min(keep.pageNumber, pdfViewer.pagesCount),
                 destArray: [null, { name: 'XYZ' }, keep.left, keep.top, null],
@@ -268,13 +345,20 @@ export const PdfViewer = forwardRef<
               const div = pdfViewer.getPageView(i)?.div;
               if (div) div.dataset.page = String(i + 1);
             }
+            const changed = changePage ? pdfViewer.getPageView(changePage - 1)?.div : null;
+            if (changed && tiles.length) {
+              const shown = tiles.map((t) =>
+                addOverlay(changed, 'bg-accent/40', { left: `${t.x}%`, top: `${t.y}%`, width: `${t.w}%`, height: `${t.h}%` }),
+              );
+              setTimeout(() => shown.forEach((el) => el.remove()), 3000);
+            }
             props.current.onPageChange(pdfViewer.currentPageNumber, pdfViewer.pagesCount);
             if (pendingTarget.current) {
               showTarget(pendingTarget.current);
               pendingTarget.current = null;
             }
             if (cover) {
-              const pageNumber = keep?.pageNumber ?? 1;
+              const pageNumber = pdfViewer.currentPageNumber;
               const onRendered = (e: { pageNumber: number }) => e.pageNumber === pageNumber && done();
               const done = () => {
                 clearTimeout(timer);
@@ -412,7 +496,7 @@ export const PdfViewer = forwardRef<
   };
 
   return (
-    <div ref={wrapper} onKeyDown={onKeyDown} className={dark ? 'pdf-dark relative h-full' : 'relative h-full'}>
+    <div ref={wrapper} onKeyDown={onKeyDown} className={dark ? 'pdf-pane pdf-dark relative isolate h-full' : 'pdf-pane relative isolate h-full'}>
       {/* PDFViewer refuses a scroller that is not absolutely positioned. */}
       <div
         ref={scroller}

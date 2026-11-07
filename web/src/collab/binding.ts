@@ -6,6 +6,8 @@
  * back as one batch of Monaco edits, so the local cursor stays where it was.
  */
 import * as Y from 'yjs';
+import { applyText } from './merge';
+import { livePeers } from './peers';
 import type { Awareness } from 'y-protocols/awareness';
 import { monaco } from '../editor/monaco';
 
@@ -13,10 +15,6 @@ import { monaco } from '../editor/monaco';
 export const LOCAL = Symbol('gitlatex-local');
 
 /** What each collaborator publishes through awareness. */
-export interface PeerState {
-  user?: { name: string; color: string };
-  cursor?: { path: string; anchor: unknown; head: unknown } | null;
-}
 
 export class TextBinding {
   private applyingRemote = false;
@@ -134,9 +132,8 @@ export class TextBinding {
     if (this.model.isDisposed()) return;
     const doc = this.ytext.doc!;
     const next: monaco.editor.IModelDeltaDecoration[] = [];
-    this.awareness.getStates().forEach((raw, clientId) => {
-      const state = raw as PeerState;
-      if (clientId === doc.clientID || !state.cursor || state.cursor.path !== this.path) return;
+    livePeers(this.awareness, doc.clientID).forEach((state, clientId) => {
+      if (!state.cursor || state.cursor.path !== this.path) return;
       const anchor = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(state.cursor.anchor), doc);
       const head = Y.createAbsolutePositionFromRelativePosition(Y.createRelativePositionFromJSON(state.cursor.head), doc);
       if (!anchor || !head || anchor.type !== this.ytext || head.type !== this.ytext) return;
@@ -163,18 +160,7 @@ export class TextBinding {
 
 /** Turn `ytext` into `text` with one delete and one insert around the common prefix/suffix. */
 export function replaceText(ytext: Y.Text, text: string, origin: unknown = LOCAL) {
-  const old = ytext.toString();
-  if (old === text) return;
-  let start = 0;
-  while (start < old.length && start < text.length && old[start] === text[start]) start++;
-  let endOld = old.length;
-  let endNew = text.length;
-  while (endOld > start && endNew > start && old[endOld - 1] === text[endNew - 1]) {
-    endOld--;
-    endNew--;
-  }
-  ytext.doc!.transact(() => {
-    if (endOld > start) ytext.delete(start, endOld - start);
-    if (endNew > start) ytext.insert(start, text.slice(start, endNew));
-  }, origin);
+  if (ytext.toString() === text) return;
+  // The smallest edits, so others' concurrent changes elsewhere in the file survive.
+  ytext.doc!.transact(() => applyText(ytext, text), origin);
 }

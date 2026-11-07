@@ -7,12 +7,12 @@ import type { monaco } from './monaco';
 type Editor = monaco.editor.IStandaloneCodeEditor;
 
 let editor: Editor | null = null;
-/** The cursor's line in the active file when another editor (the LyX-style one) has it. */
-let cursorLine: (() => number) | null = null;
-/** Inserts LaTeX at the cursor of a non-Monaco editor (the LyX-style one) while it shows the active file. */
-let texInserter: ((tex: string, select?: string) => boolean) | null = null;
 /** Range of the "/query" text that opened the slash menu (replaced on insert). */
 let pendingSlashRange: monaco.IRange | null = null;
+/** Set while another editor (the LyX-style one) shows the active file: the line its cursor is on. */
+let cursorLineOverride: (() => number | null) | null = null;
+/** Set while another editor shows the active file: where wizards and slash commands insert LaTeX. */
+let texInserter: ((tex: string, select?: string) => boolean) | null = null;
 
 export const editorBridge = {
   set(e: Editor | null) {
@@ -23,17 +23,13 @@ export const editorBridge = {
   get(): Editor | null {
     return editor;
   },
-  /** Let a non-Monaco editor report the cursor's line (null to hand it back to Monaco). */
-  setCursorLine(fn: (() => number) | null) {
-    cursorLine = fn;
+  /** Let another editor answer cursorLine() (null hands it back to Monaco). */
+  setCursorLine(fn: (() => number | null) | null) {
+    cursorLineOverride = fn;
   },
-  /** The line of the active file the cursor is on, whichever editor shows it. */
+  /** The line of the active file the cursor is on, in whichever editor shows it. */
   cursorLine(): number | null {
-    return cursorLine ? cursorLine() : (editor?.getPosition()?.lineNumber ?? null);
-  },
-  /** Let a non-Monaco editor take insertions (null to hand them back to Monaco). */
-  setTexInserter(fn: ((tex: string, select?: string) => boolean) | null) {
-    texInserter = fn;
+    return cursorLineOverride ? cursorLineOverride() : (editor?.getPosition()?.lineNumber ?? null);
   },
   setSlashRange(r: monaco.IRange | null) {
     pendingSlashRange = r;
@@ -42,6 +38,14 @@ export const editorBridge = {
     const r = pendingSlashRange;
     pendingSlashRange = null;
     return r;
+  },
+  /** Whether another editor (the LyX-style one), not Monaco, shows the active file. */
+  cursorLineIsElsewhere() {
+    return texInserter != null;
+  },
+  /** Let another editor (the LyX-style one) take inserted LaTeX while it shows the active file (null hands it back). */
+  setTexInserter(fn: ((tex: string, select?: string) => boolean) | null) {
+    texInserter = fn;
   },
   /** Insert a Monaco snippet at the cursor (or replacing `range`). */
   insertSnippet(snippet: string, range?: monaco.IRange | null) {
@@ -54,7 +58,7 @@ export const editorBridge = {
     if (range) editor.setSelection(range);
     const controller = editor.getContribution('snippetController2') as unknown as { insert(s: string): void } | null;
     if (controller) controller.insert(snippet);
-    else editor.trigger('texbrowser', 'type', { text: snippet.replace(/\$\{\d+:?([^}]*)\}|\$\d/g, '$1') });
+    else editor.trigger('gitlatex', 'type', { text: snippet.replace(/\$\{\d+:?([^}]*)\}|\$\d/g, '$1') });
     return true;
   },
   insertText(text: string) {
@@ -62,7 +66,7 @@ export const editorBridge = {
     if (!editor) return false;
     const sel = editor.getSelection();
     if (!sel) return false;
-    editor.executeEdits('texbrowser', [{ range: sel, text, forceMoveMarkers: true }]);
+    editor.executeEdits('gitlatex', [{ range: sel, text, forceMoveMarkers: true }]);
     editor.focus();
     return true;
   },

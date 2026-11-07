@@ -16,6 +16,7 @@
 
 import { getApiBase } from "../core/api.js";
 import { state } from "../core/state.js";
+import { changedPageOverlay } from "./pdfchanges.js";
 
 //const PDFJS_ROOT = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/";
 const PDFJS_ROOT = "https://cdn.jsdelivr.net/gh/revolutionibus/pdf.js@v1.0.1/";
@@ -140,9 +141,11 @@ export function setPdfDoubleClickHandler(fn) {
 /**
  * Shows the PDF at url. path is its repo-relative path when it lives in the
  * project; SyncTeX needs it. Resolves true when PDF.js drew it, false when the
- * iframe fallback took over.
+ * iframe fallback took over. options.page selects the cursor page after a build;
+ * options.highlightChanges briefly marks visual changes on that page only.
  */
-export async function showPdf(url, path = null) {
+export async function showPdf(url, path = null, options = {}) {
+  const requestedPage = Number.isInteger(options.page) && options.page > 0 ? options.page : null;
   const id = ++view.loadId;
   const { empty } = els();
   if (empty) empty.classList.add("hidden");
@@ -160,6 +163,12 @@ export async function showPdf(url, path = null) {
   } catch (e) {
     if (id !== view.loadId) return false;
     console.warn("PDF.js could not show the PDF, using the browser viewer:", e);
+    if (requestedPage) {
+      const [base, hash = ""] = url.split("#", 2);
+      const fragment = new URLSearchParams(hash);
+      fragment.set("page", String(requestedPage));
+      url = base + "#" + fragment;
+    }
     showFallback(url, path);
     return false;
   }
@@ -169,8 +178,21 @@ export async function showPdf(url, path = null) {
   }
   const oldDoc = view.doc;
   const sameFile = view.path && view.path === path && !view.usingFallback;
-  // A rebuild of the same file keeps the reader where they were.
-  const keep = sameFile ? view.location : null;
+  const page = requestedPage ? Math.min(requestedPage, doc.numPages) : null;
+  let overlay = null;
+  if (options.highlightChanges && sameFile && page && oldDoc && page <= oldDoc.numPages) {
+    try {
+      overlay = await changedPageOverlay(await oldDoc.getPage(page), await doc.getPage(page));
+    } catch (_) {
+      // Rendering/comparison is optional; navigation must still work.
+    }
+    if (id !== view.loadId) {
+      destroyDoc(doc);
+      return false;
+    }
+  }
+  // A rebuild of the same file keeps the reader where they were, unless a page was asked for.
+  const keep = page ? null : sameFile ? view.location : null;
   const cover = sameFile ? coverPages() : null;
   view.url = url;
   view.path = path;
@@ -203,7 +225,12 @@ export async function showPdf(url, path = null) {
       ignoreDestinationZoom: true,
     });
   }
-  if (cover) uncoverWhenDrawn(cover, keep ? keep.pageNumber : 1);
+  if (page) pdfViewer.scrollPageIntoView({ pageNumber: page });
+  if (cover) uncoverWhenDrawn(cover, keep ? keep.pageNumber : page || 1);
+  if (overlay) {
+    pdfViewer.getPageView(page - 1)?.div.appendChild(overlay);
+    setTimeout(() => overlay.remove(), 3000);
+  }
   v.jumpHistory.initialize(path ? marksStore(path) : null, path ? path.split("/").pop() : "document.pdf");
   return true;
 }

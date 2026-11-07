@@ -11,21 +11,22 @@ user to resolve in the editor, and Conflict is raised with kept=True.
 """
 
 import os
-import re
 
 from gitlatex.services import comments
 from gitlatex.services.git_backend import GitCommandError
 
-# What TeX writes next to a document. Committed copies are common (people
-# commit main.pdf), and every compile rewrites them locally.
-_BUILD_OUTPUT = re.compile(
-    r"\.(synctex\.gz|synctex|aux|log|out|toc|lof|lot|fls|fdb_latexmk|bcf|run\.xml|blg|bbl|nav|snm|vrb|xdv)$",
-    re.IGNORECASE,
+# What TeX (and BibTeX, makeindex, latexmk, beamer…) writes next to a
+# document. Committed copies are common (people commit main.pdf), and every
+# compile rewrites them locally.
+BUILD_SUFFIXES = (
+    ".aux", ".log", ".out", ".toc", ".lof", ".lot", ".fls", ".fdb_latexmk",
+    ".synctex.gz", ".synctex", ".synctex(busy)", ".bbl", ".blg", ".bcf", ".run.xml",
+    ".idx", ".ind", ".ilg", ".nav", ".snm", ".vrb", ".xdv", ".dvi",
 )
 
 
 def is_build_output(root, path):
-    if _BUILD_OUTPUT.search(path):
+    if path.lower().endswith(BUILD_SUFFIXES):
         return True
     # A PDF is build output only when it is a document's own PDF (main.pdf next
     # to main.tex); figure PDFs are the user's files.

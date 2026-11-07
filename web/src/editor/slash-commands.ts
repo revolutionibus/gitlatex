@@ -80,7 +80,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { id: 'plot', title: 'Function plot', description: 'PGFPlots chart (fetched on demand)', category: 'Figures & tables', icon: 'show_chart', keywords: ['pgfplots', 'chart', 'graph'], snippet: '\\begin{tikzpicture}\n\t\\begin{axis}[xlabel=$x$, ylabel=$y$, grid=major, width=0.8\\linewidth]\n\t\t\\addplot[blue, thick, domain=${1:-3}:${2:3}, samples=100] {${3:x^2}};\n\t\\end{axis}\n\\end{tikzpicture}\n$0', packages: [pkg('pgfplots')] },
 
   // References
-  { id: 'cite', title: 'Citation', description: 'Cite from your .bib files — or import by DOI', category: 'References', icon: 'bookmarks', keywords: ['bibliography', 'reference', 'doi', 'bibtex'], wizard: 'cite' },
+  { id: 'cite', title: 'Citation', description: 'Cite from your .bib files or Zotero — or import by DOI', category: 'References', icon: 'bookmarks', keywords: ['bibliography', 'reference', 'doi', 'bibtex', 'zotero'], wizard: 'cite' },
   { id: 'ref', title: 'Cross-reference', description: 'Refer to a labelled section, figure or equation', category: 'References', icon: 'find_in_page', keywords: ['label', 'reference', 'eqref'], wizard: 'ref' },
   { id: 'label', title: 'Label', description: 'Name this spot for cross-references', category: 'References', icon: 'label', snippet: '\\label{${1|sec,fig,tab,eq|}:${2:name}}$0' },
   { id: 'bibliography', title: 'Bibliography', description: 'BibTeX bibliography from references.bib', category: 'References', icon: 'library_books', keywords: ['references', 'bibtex', 'natbib'], snippet: '\\bibliographystyle{${1|plain,unsrt,alpha,abbrv,ieeetr,plainnat|}}\n\\bibliography{${2:references}}\n$0' },

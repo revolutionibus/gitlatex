@@ -148,20 +148,20 @@ label:has(> input[type='checkbox']) {
   background: var(--c-accent);
 }
 
-/* PDF pages (laid out by pdf.js's PDFViewer, src/pdf/PdfViewer.tsx) */
-.pdfViewer .page {
-  /* pdf.js sizes the page's content box and the link/text layers to the same
-     width; Tailwind's border-box would shrink the canvas by the 9px page border
-     on each side, leaving links offset from the text they cover. */
-  box-sizing: content-box;
+/* PDF pages (laid out by pdf.js's PDFViewer, src/pdf/PdfViewer.tsx; the text
+   and link layers are styled by pdf_viewer.css) */
+.pdf-pane .pdfViewer {
+  padding: 16px 0 2px;
+}
+.pdf-pane .pdfViewer.removePageBorders .page {
+  margin: 0 auto 14px;
   box-shadow: 0 1px 3px rgb(0 0 0 / 0.25), 0 8px 24px -8px rgb(0 0 0 / 0.35);
 }
 .pdf-dark .pdfViewer .page canvas {
   filter: invert(0.9) hue-rotate(180deg) contrast(0.9);
 }
-
-/* The jump-history pill and panel come styled from pdf_viewer.css; these hand
-   them the app's theme colours instead of Firefox's. */
+/* The jump-history pill and panel come styled from pdf_viewer.css (our pdf.js
+   fork); these hand them the app's theme colours instead of Firefox's. */
 :is(#jumpHistory, #jumpHistoryPanel) {
   --jump-history-border-color: var(--c-line) !important;
   --jump-history-bg-color: var(--c-panel) !important;
@@ -194,7 +194,6 @@ label:has(> input[type='checkbox']) {
   100% { background: rgb(var(--c-accent-rgb) / 0); outline: 2px solid rgb(var(--c-accent-rgb) / 0); }
 }
 
-/* The text layer itself is styled by pdf_viewer.css. */
 .textLayer ::selection {
   background: rgb(var(--c-accent-rgb) / 0.35);
 }

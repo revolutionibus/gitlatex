@@ -8,7 +8,12 @@ import { createPortal } from 'react-dom';
 
 export { clsx };
 
-type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'subtle';
+/**
+ * `danger` is a solid red button (the main action of a destructive dialog);
+ * `danger-subtle` is red text with a faint red border, for a destructive action
+ * that sits beside others.
+ */
+type Variant = 'primary' | 'secondary' | 'ghost' | 'danger' | 'danger-subtle' | 'subtle';
 
 export function Button({
   variant = 'secondary',
@@ -31,6 +36,7 @@ export function Button({
         variant === 'ghost' && 'text-muted hover:bg-hover hover:text-fg',
         variant === 'subtle' && 'bg-hover/60 text-fg hover:bg-hover',
         variant === 'danger' && 'bg-danger text-white hover:brightness-110',
+        variant === 'danger-subtle' && 'border border-danger/35 text-danger hover:border-danger/60 hover:bg-danger/10',
         className,
       )}
     >
@@ -46,8 +52,9 @@ export function IconButton({
   className,
   children,
   size = 'md',
+  danger,
   ...rest
-}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; active?: boolean; size?: 'sm' | 'md' | 'lg' }) {
+}: ButtonHTMLAttributes<HTMLButtonElement> & { label: string; active?: boolean; size?: 'sm' | 'md' | 'lg'; /** Destructive: turns red on hover. */ danger?: boolean }) {
   return (
     <button
       {...rest}
@@ -56,7 +63,7 @@ export function IconButton({
       className={clsx(
         'focus-ring inline-flex shrink-0 items-center justify-center rounded-md transition-colors disabled:cursor-not-allowed disabled:opacity-40',
         size === 'sm' ? 'size-6' : size === 'lg' ? 'size-10' : 'size-8',
-        active ? 'bg-accent/15 text-accent' : 'text-muted hover:bg-hover hover:text-fg',
+        active ? 'bg-accent/15 text-accent' : danger ? 'text-muted hover:bg-danger/10 hover:text-danger' : 'text-muted hover:bg-hover hover:text-fg',
         className,
       )}
     >
@@ -78,9 +85,9 @@ export function Kbd({ children }: { children: ReactNode }) {
   return <kbd className="rounded border border-line bg-panel-2 px-1.5 py-0.5 font-mono text-[10px] text-muted">{children}</kbd>;
 }
 
-export function Toggle({ checked, onChange, label, description }: { checked: boolean; onChange: (v: boolean) => void; label: string; description?: string }) {
+export function Toggle({ checked, onChange, label, description, className }: { checked: boolean; onChange: (v: boolean) => void; label: string; description?: string; className?: string }) {
   return (
-    <label className="flex cursor-pointer items-start justify-between gap-4 py-2">
+    <label className={clsx('flex cursor-pointer items-start justify-between gap-4', className ?? 'py-2')}>
       <span>
         <span className="block text-[13px] text-fg">{label}</span>
         {description && <span className="mt-0.5 block text-xs text-muted">{description}</span>}
@@ -122,6 +129,7 @@ export function Modal({
   footer,
   width = 'max-w-lg',
   icon,
+  bodyClassName = 'max-h-[70vh] overflow-y-auto px-4 py-4',
 }: {
   title: ReactNode;
   onClose: () => void;
@@ -129,6 +137,7 @@ export function Modal({
   footer?: ReactNode;
   width?: string;
   icon?: ReactNode;
+  bodyClassName?: string;
 }) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -150,7 +159,7 @@ export function Modal({
             <X className="size-4" />
           </IconButton>
         </div>
-        <div className="max-h-[70vh] overflow-y-auto px-4 py-4">{children}</div>
+        <div className={bodyClassName}>{children}</div>
         {footer && <div className="flex items-center justify-end gap-2 border-t border-line bg-panel-2/50 px-4 py-3">{footer}</div>}
       </div>
     </div>,

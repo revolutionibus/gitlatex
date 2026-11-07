@@ -4,7 +4,7 @@
  * LyX-style editor for .tex files when that style is chosen, and previews for
  * binary files.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { clsx } from 'clsx';
 import {
   Bold, FileText, Image as ImageIcon, Italic, Link2, List, ListOrdered, Sigma, Table2, Quote, X, FileCode2, BookMarked, Heading1, Download, Braces, Crosshair,
@@ -28,9 +28,15 @@ import {
 } from '../state/actions';
 import { basename, extname, isImagePath } from '../utils/paths';
 import { formatBytes, modKey } from '../utils/misc';
-import { IconButton, Button, EmptyState } from '../components/ui';
-import { LyxPane } from '../lyx/LyxPane';
+import { IconButton, Button, EmptyState, Spinner } from '../components/ui';
 import { FileIcon } from '../components/FileIcon';
+
+// ProseMirror and MathLive load only when a file is first shown LyX-style.
+const LyxPane = lazy(() => import('../lyx/LyxPane').then((m) => ({ default: m.LyxPane })));
+
+/** Whether `path` is shown in the LyX-style editor rather than as LaTeX source. */
+const isLyxFile = (path: string | null | undefined, settings = getState().settings) =>
+  settings.lyxEnabled !== false && settings.editorStyle === 'lyx' && !!path && extname(path) === 'tex';
 
 registerLanguages();
 
@@ -58,9 +64,6 @@ function onLinkArgument(line: string, column: number) {
   }
   return false;
 }
-
-/** Whether `path` opens in the LyX-style editor. */
-const isLyxFile = (path: string | null | undefined, style = getState().settings.editorStyle) => style === 'lyx' && !!path && extname(path) === 'tex';
 
 const vimHooks: VimHooks = {
   currentFile: () => getState().activePath,
@@ -94,7 +97,7 @@ export function EditorPane() {
 
   const file = activePath ? workspace()?.get(activePath) : undefined;
   const isText = file?.kind === 'text';
-  const lyx = isText && isLyxFile(activePath, settings.editorStyle);
+  const lyx = isText && isLyxFile(activePath, settings);
   void treeVersion;
 
   const slashItems = useMemo(() => (slash ? filterSlash(slash.query) : SLASH_COMMANDS), [slash]);
@@ -202,6 +205,14 @@ export function EditorPane() {
       contextMenuOrder: 0.5,
       run: () => forwardSearch(),
     });
+    editor.addAction({
+      id: 'gitlatex.insertCitation',
+      label: 'Insert citation…',
+      keybindings: [M.CtrlCmd | M.Shift | K.KeyC],
+      contextMenuGroupId: 'navigation',
+      contextMenuOrder: 0.6,
+      run: () => openDialog({ type: 'wizard', wizard: 'cite' }),
+    });
     const syncClickSub = editor.onMouseDown((e) => {
       const ev = e.event;
       if (!(ev.ctrlKey || ev.metaKey) || ev.altKey || ev.shiftKey || !ev.leftButton) return;
@@ -307,27 +318,35 @@ export function EditorPane() {
 
     // Live math preview under the cursor.
     let mathTimer: ReturnType<typeof setTimeout> | undefined;
+    let shownMath: { tex: string; display: boolean; endLine: number } | null = null;
+    /** Places the preview below the math's last line, or hides it while that line is scrolled out of view. */
+    const placeMath = () => {
+      const vis = shownMath && editor.getScrolledVisiblePosition({ lineNumber: shownMath.endLine, column: 1 });
+      if (!shownMath || !vis || vis.top < 0 || vis.top + vis.height > editor.getLayoutInfo().height) return setMath(null);
+      const hostRect = host.getBoundingClientRect();
+      const paneRect = paneRef.current!.getBoundingClientRect();
+      setMath({ tex: shownMath.tex, display: shownMath.display, x: hostRect.left - paneRect.left + 56, y: hostRect.top - paneRect.top + vis.top + vis.height + 6 });
+    };
     const mathSub = editor.onDidChangeCursorSelection(() => {
       clearTimeout(mathTimer);
       mathTimer = setTimeout(() => {
         const model = editor.getModel();
         const pos = editor.getPosition();
-        if (!getState().settings.mathPreview || getState().settings.concealTex || !model || !pos || model.getLanguageId() !== 'latex' || slashRef.current) {
-          setMath(null);
-          return;
-        }
-        const m = mathAt(model, pos);
-        if (!m) {
-          setMath(null);
-          return;
-        }
-        const vis = editor.getScrolledVisiblePosition({ lineNumber: m.endLine, column: 1 });
-        const hostRect = host.getBoundingClientRect();
-        const paneRect = paneRef.current!.getBoundingClientRect();
-        if (!vis) return setMath(null);
-        setMath({ tex: m.tex, display: m.display, x: hostRect.left - paneRect.left + 56, y: hostRect.top - paneRect.top + vis.top + vis.height + 6 });
+        const enabled = getState().settings.mathPreview && !getState().settings.concealTex && model && pos && model.getLanguageId() === 'latex' && !slashRef.current;
+        shownMath = enabled ? mathAt(model, pos) : null;
+        placeMath();
       }, 180);
     });
+    const mathScrollSub = editor.onDidScrollChange(() => {
+      if (shownMath) placeMath();
+    });
+    const forgetMath = () => {
+      clearTimeout(mathTimer);
+      shownMath = null;
+      setMath(null);
+    };
+    const mathModelSub = editor.onDidChangeModel(forgetMath);
+    const mathBlurSub = editor.onDidBlurEditorWidget(forgetMath);
 
     return () => {
       syncClickSub.dispose();
@@ -342,6 +361,9 @@ export function EditorPane() {
       cursorSub.dispose();
       blurSub.dispose();
       mathSub.dispose();
+      mathScrollSub.dispose();
+      mathModelSub.dispose();
+      mathBlurSub.dispose();
       clearTimeout(mathTimer);
       slashOpen.reset();
       editorBridge.set(null);
@@ -394,7 +416,8 @@ export function EditorPane() {
     const vs = viewStates.current.get(activePath);
     if (vs) editor.restoreViewState(vs);
     applyMarkers();
-    if (!getState().dialog && !isLyxFile(activePath)) editor.focus(); // never steal focus from an open dialog
+    // Never steal focus from an open dialog, nor from the LyX-style editor showing this file.
+    if (!getState().dialog && !isLyxFile(activePath)) editor.focus();
   }, [activePath, isText, epoch]);
 
   // Forget per-file view state when another project is opened.
@@ -484,11 +507,11 @@ export function EditorPane() {
           </div>
         ))}
       </div>
-      {isText && extname(activePath ?? '') === 'tex' && (
-        <div className="flex shrink-0 items-center gap-0.5 px-2" role="group" aria-label="Editor style">
+      {isText && extname(activePath ?? '') === 'tex' && settings.lyxEnabled !== false && (
+        <div className="flex shrink-0 items-center gap-0.5 border-l border-line px-1.5" role="group" aria-label="Editor style">
           {([
-            ['default', 'Source', 'Edit the LaTeX source'],
-            ['lyx', 'LyX', 'Edit in the LyX style: layouts, live formulas and insets (WYSIWYM)'],
+            ['source', 'Source', 'Edit the LaTeX source'],
+            ['lyx', 'LyX', 'Edit LyX-style: see headings, lists, theorems and formulas as they will look (WYSIWYM)'],
           ] as const).map(([id, label, title]) => (
             <button
               key={id}
@@ -500,17 +523,17 @@ export function EditorPane() {
               {label}
             </button>
           ))}
-          {settings.editorStyle !== 'lyx' && (
-            <button
-              title={`Show formulas rendered and edit them in a math box (${modKey}+M inline, ${modKey}+Shift+M display)`}
-              aria-pressed={settings.concealTex}
-              onClick={() => updateSettings({ concealTex: !settings.concealTex })}
-              className={clsx('ml-1 rounded px-2 py-0.5 text-[11.5px]', settings.concealTex ? 'bg-accent/15 font-medium text-fg' : 'text-muted hover:bg-hover hover:text-fg')}
-            >
-              Conceal TeX
-            </button>
-          )}
         </div>
+      )}
+      {isText && extname(activePath ?? '') === 'tex' && !lyx && (
+        <button
+          title={`Show formulas rendered and edit them in a math box (${modKey}+M inline, ${modKey}+Shift+M display)`}
+          aria-pressed={settings.concealTex}
+          onClick={() => updateSettings({ concealTex: !settings.concealTex })}
+          className={clsx('mr-1.5 shrink-0 rounded px-2 py-0.5 text-[11.5px]', settings.concealTex ? 'bg-accent/15 font-medium text-fg' : 'text-muted hover:bg-hover hover:text-fg')}
+        >
+          Conceal TeX
+        </button>
       )}
       </div>
 
@@ -546,11 +569,16 @@ export function EditorPane() {
           <div className="relative min-h-0 flex-1">
             <div ref={hostRef} className="absolute inset-0" data-testid="editor" />
           </div>
-          <div ref={vimBarRef} className={clsx('vim-statusbar', !settings.vim && 'hidden')} />
+          {settings.vim && <div ref={vimBarRef} className="vim-statusbar" />}
         </div>
       </div>
 
-      {lyx && activePath && <LyxPane key={activePath} path={activePath} />}
+      {lyx && activePath && (
+        <Suspense fallback={<div className="flex min-h-0 flex-1 items-center justify-center"><Spinner className="size-6 text-accent" /></div>}>
+          {/* Keyed by project too: every project has its own main.tex. */}
+          <LyxPane key={`${epoch}:${activePath}`} path={activePath} />
+        </Suspense>
+      )}
 
       {/* Binary / empty states */}
       {!isText && (

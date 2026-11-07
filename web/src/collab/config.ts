@@ -1,14 +1,14 @@
 /**
  * Live collaboration settings. Each project decides on its own whether it is
- * shared, in which room and with which room token; your name (GitHub username),
- * colour and the relay owner's admin login are global. Everything lives in this
- * browser's localStorage.
+ * shared, in which room and with which room token; your colour and the owner's
+ * admin login are global. Everything lives in this browser's localStorage.
+ * Your name is not stored: it is your git user.name.
  */
 
 export interface CollabConfig {
   /** Connect automatically when the project is opened. */
   enabled: boolean;
-  /** The relay, e.g. `gitlatex-collab.you.workers.dev` (or `localhost:8787` for `wrangler dev`). */
+  /** The relay, e.g. `gitlatex-collab.you.workers.dev` (or `localhost:8787` when run locally). */
   host: string;
   /** Everyone who enters the same room edits together. */
   room: string;
@@ -17,6 +17,7 @@ export interface CollabConfig {
 }
 
 export interface CollabUser {
+  /** Your git user.name. */
   name: string;
   color: string;
 }
@@ -115,16 +116,17 @@ export function moveCollabConfig(from: string, to: string | null) {
   if (saved && to) write(projectKey(to), saved);
 }
 
-export function readCollabUser(): CollabUser {
-  const saved = read<CollabUser>(USER_KEY);
-  return {
-    name: saved?.name ?? '',
-    color: saved?.color ?? PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)],
-  };
+/** Your cursor colour (your name comes from git). */
+export function readCollabColor(): string {
+  const saved = read<Pick<CollabUser, 'color'>>(USER_KEY)?.color;
+  if (saved) return saved;
+  const color = PEER_COLORS[Math.floor(Math.random() * PEER_COLORS.length)];
+  write(USER_KEY, { color });
+  return color;
 }
 
-export function writeCollabUser(user: CollabUser) {
-  write(USER_KEY, user);
+export function writeCollabColor(color: string) {
+  write(USER_KEY, { color });
 }
 
 export function readCollabAdmin(): CollabAdmin | null {

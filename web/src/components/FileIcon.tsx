@@ -4,7 +4,8 @@ import { extname, isImagePath } from '../utils/paths';
 
 export function FileIcon({ path, className }: { path: string; className?: string }) {
   const e = extname(path);
-  const cls = clsx(className ?? 'size-4');
+  // shrink-0: in a flex row, a long file name would otherwise squeeze the icon.
+  const cls = clsx(className ?? 'size-4', 'shrink-0');
   if (e === 'tex' || e === 'ltx') return <FileText className={clsx(cls, 'text-accent')} />;
   if (e === 'bib') return <BookMarked className={clsx(cls, 'text-ok')} />;
   if (e === 'sty' || e === 'cls' || e === 'bst' || e === 'def' || e === 'cfg') return <FileCog className={clsx(cls, 'text-warn')} />;
@@ -16,5 +17,5 @@ export function FileIcon({ path, className }: { path: string; className?: string
 
 export function FolderIcon({ open, className }: { open: boolean; className?: string }) {
   const Icon = open ? FolderOpen : Folder;
-  return <Icon className={clsx(className ?? 'size-4', 'text-accent-2')} />;
+  return <Icon className={clsx(className ?? 'size-4', 'shrink-0', 'text-accent-2')} />;
 }

@@ -12,7 +12,7 @@ import { DEFAULT_SETTINGS, type Diagnostic, type ProjectMeta, type Settings } fr
 import type { UpdateInfo } from './updates';
 import type { ScmStatus } from '../storage/server';
 import type { CollabState } from '../collab/session';
-import { readCollabAdmin, type CollabAdmin } from '../collab/config';
+import { readCollabAdmin, readCollabColor, type CollabAdmin } from '../collab/config';
 
 export type CompileStatus = 'idle' | 'running' | 'success' | 'warnings' | 'errors' | 'failed' | 'cancelled' | 'crashed';
 
@@ -21,7 +21,7 @@ export type BottomView = 'problems' | 'log' | 'console';
 
 export type Dialog =
   | { type: 'new-project'; initialTemplate?: string }
-  | { type: 'settings'; section?: 'about' }
+  | { type: 'settings'; section?: 'about' | 'zotero' }
   | { type: 'publish' }
   | { type: 'command-palette' }
   | { type: 'shortcuts' }
@@ -48,6 +48,7 @@ export interface CompileState {
   /** Last successfully produced PDF (kept visible while a later compile fails). */
   pdf: Uint8Array | null;
   pdfVersion: number;
+  cursorPage: number | null;
   pdfFromCurrentRun: boolean;
   synctex: SyncTex | null;
   diagnostics: Diagnostic[];
@@ -60,6 +61,8 @@ export interface CompileState {
 export interface AppState {
   settings: Settings;
   projects: ProjectMeta[];
+  /** Projects whose folders are being deleted right now. */
+  deleting: string[];
   project: ProjectMeta | null;
   treeVersion: number;
   contentVersion: number;
@@ -89,8 +92,10 @@ export interface AppState {
   scm: ScmStatus | null;
   /** The live collaboration session of the open project (null when it is not shared). */
   collab: CollabState | null;
-  /** The relay owner's login (to create rooms and invites), when signed in in this browser. */
+  /** The relay owner's login (global, not per project); null when not signed in. */
   collabAdmin: CollabAdmin | null;
+  /** Your cursor colour in live sessions. */
+  collabColor: string;
 }
 
 const SETTINGS_KEY = 'gitlatex.settings';
@@ -142,6 +147,27 @@ export function setCompilerApi(patch: { url?: string; key?: string }) {
   }
 }
 
+// A zotero.org API key, so the citation picker can search the cloud library
+// when the Zotero app is not running.
+const ZOTERO_KEY = 'gitlatex-zotero-api-key';
+
+export function getZoteroKey(): string {
+  try {
+    return localStorage.getItem(ZOTERO_KEY)?.trim() ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setZoteroKey(key: string) {
+  try {
+    if (key.trim()) localStorage.setItem(ZOTERO_KEY, key.trim());
+    else localStorage.removeItem(ZOTERO_KEY);
+  } catch {
+    /* storage disabled */
+  }
+}
+
 /** `example.com/compile` → `https://example.com/compile`, as the classic editor did. */
 export function normalizeCompilerApiUrl(url: string) {
   const u = url.trim();
@@ -155,6 +181,7 @@ export const initialCompile: CompileState = {
   result: null,
   pdf: null,
   pdfVersion: 0,
+  cursorPage: null,
   pdfFromCurrentRun: false,
   synctex: null,
   diagnostics: [],
@@ -167,6 +194,7 @@ export const initialCompile: CompileState = {
 export const useStore = create<AppState>(() => ({
   settings: loadSettings(),
   projects: [],
+  deleting: [],
   project: null,
   treeVersion: 0,
   contentVersion: 0,
@@ -189,6 +217,7 @@ export const useStore = create<AppState>(() => ({
   scm: null,
   collab: null,
   collabAdmin: readCollabAdmin(),
+  collabColor: readCollabColor(),
 }));
 
 export const getState = useStore.getState;

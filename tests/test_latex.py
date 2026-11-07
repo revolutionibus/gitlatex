@@ -1,156 +1,143 @@
-"""The local LaTeX build (services/latex.py): how many passes it runs, when the
-bibliography tool runs, and XeLaTeX's single PDF conversion. Runs the real TeX
-engines, so each test is skipped when its engine is not installed.
+"""Local builds (run_latex_build): passes, bibliography runs and XeLaTeX, with a
+fake engine that writes the files a real one would.
 
     python -m unittest discover tests
 """
 
 import os
-import shutil
+import sys
 import tempfile
 import unittest
+from unittest import mock
 
-from gitlatex.services import latex
-from gitlatex.services.latex import run_latex_build
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-DOC = r"""\documentclass{article}
-\begin{document}
-\section{Intro}\label{sec:intro}
-See Section~\ref{sec:intro}. %s
-%s
-\end{document}
-"""
-
-BIB = """@article{knuth,
-  author = {Donald Knuth},
-  title = {Literate Programming},
-  journal = {The Computer Journal},
-  year = {1984},
-}
-@book{lamport,
-  author = {Leslie Lamport},
-  title = {LaTeX: A Document Preparation System},
-  publisher = {Addison-Wesley},
-  year = {1994},
-}
-"""
+from gitlatex.services import latex  # noqa: E402
 
 
-def tools(result, name):
-    return [s for s in result["steps"] if s["tool"] == name]
+def write(path, text):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "w", encoding="utf-8", newline="\n") as f:
+        f.write(text)
+
+
+class FakeTeX:
+    """Stands in for the TeX tools: `aux(n)` is the .aux the engine writes on its
+    n-th pass of a build; `log` the .log it writes."""
+
+    def __init__(self, root, aux, log="", engine_code=0, bib_code=0, bib_out=""):
+        self.root, self.aux, self.log = root, aux, log
+        self.engine_code, self.bib_code, self.bib_out = engine_code, bib_code, bib_out
+        self.calls = []
+        self.passes = 0
+
+    def run(self, cmd, cwd, timeout=180):
+        tool = cmd[0]
+        self.calls.append(tool)
+        if tool in latex.LATEX_ENGINES:
+            self.passes += 1
+            write(os.path.join(cwd, "main.aux"), self.aux(self.passes))
+            write(os.path.join(cwd, "main.log"), self.log)
+            write(os.path.join(cwd, "main.xdv" if "-no-pdf" in cmd else "main.pdf"), "out")
+            return self.engine_code, ""
+        if tool in ("bibtex", "biber"):
+            write(os.path.join(cwd, "main.bbl"), "\\begin{thebibliography}{1}\\end{thebibliography}")
+            return self.bib_code, self.bib_out
+        if tool == "xdvipdfmx":
+            write(os.path.join(cwd, "main.pdf"), "pdf")
+            return 0, ""
+        raise FileNotFoundError(tool)
+
+    def build(self, engine="pdflatex", tools=("bibtex", "biber", "xdvipdfmx")):
+        self.passes = 0
+        self.calls = []
+        which = lambda name: ("/usr/bin/" + name) if name in tools else None
+        with mock.patch.object(latex, "_run_tool", self.run), mock.patch.object(latex.shutil, "which", which):
+            return latex.run_latex_build(self.root, "main.tex", engine)
 
 
 class BuildTest(unittest.TestCase):
-    engine = "pdflatex"
-
     def setUp(self):
-        if not shutil.which(self.engine):
-            self.skipTest(self.engine + " is not installed")
-        self.dir = tempfile.mkdtemp()
-        latex._bib_inputs.clear()
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = self._tmp.name
+        write(os.path.join(self.root, "main.tex"), "x")
+        latex._bib_runs.clear()
 
     def tearDown(self):
-        shutil.rmtree(self.dir, ignore_errors=True)
-
-    def write(self, name, text):
-        with open(os.path.join(self.dir, name), "w") as f:
-            f.write(text)
-
-    def build(self):
-        result = run_latex_build(self.dir, "main.tex", self.engine)
-        self.assertIsNone(result["error"], result["log"][-2000:])
-        self.assertTrue(os.path.isfile(os.path.join(self.dir, "main.pdf")))
-        return result
-
-    def log(self):
-        with open(os.path.join(self.dir, "main.log"), errors="replace") as f:
-            return f.read()
-
-    def test_first_build_settles_references(self):
-        self.write("main.tex", DOC % ("Text.", ""))
-        result = self.build()
-        self.assertGreaterEqual(len(tools(result, self.engine)), 2)
-        self.assertNotIn("undefined references", self.log())
+        self._tmp.cleanup()
 
     def test_editing_text_takes_one_pass(self):
-        self.write("main.tex", DOC % ("Text.", ""))
-        self.build()
-        self.write("main.tex", DOC % ("Different text, same labels.", ""))
-        result = self.build()
-        self.assertEqual(len(tools(result, self.engine)), 1)
+        tex = FakeTeX(self.root, lambda n: "\\relax\n\\newlabel{a}{{1}{1}}\n")
+        tex.build()  # the first build makes the .aux
+        tex.build()
+        self.assertEqual(tex.calls, ["pdflatex"])
 
-    def test_a_new_label_reruns(self):
-        self.write("main.tex", DOC % ("Text.", ""))
-        self.build()
-        self.write("main.tex", DOC % ("See also Section~\\ref{sec:more}.", "\\section{More}\\label{sec:more}"))
-        result = self.build()
-        self.assertGreaterEqual(len(tools(result, self.engine)), 2)
-        self.assertNotIn("undefined references", self.log())
+    def test_a_new_label_reruns_until_it_settles(self):
+        tex = FakeTeX(self.root, lambda n: "\\newlabel{a}{{1}{1}}\n")
+        tex.build()
+        tex.aux = lambda n: "\\newlabel{a}{{1}{1}}\n\\newlabel{b}{{2}{%d}}\n" % min(n, 2)
+        tex.build()
+        self.assertEqual(tex.calls, ["pdflatex", "pdflatex", "pdflatex"])
 
-    def test_bibtex_runs_only_when_its_inputs_change(self):
-        if not shutil.which("bibtex"):
-            self.skipTest("bibtex is not installed")
-        self.write("refs.bib", BIB)
-        cite = "\\bibliographystyle{plain}\\bibliography{refs}"
-        self.write("main.tex", DOC % ("\\cite{knuth}", cite))
-        self.assertEqual(len(tools(self.build(), "bibtex")), 1)
-        self.assertNotIn("Citation `knuth' on page 1 undefined", self.log())
+    def test_a_rerun_request_alone_gives_one_more_pass_not_a_loop(self):
+        tex = FakeTeX(self.root, lambda n: "\\relax\n", log="Package rerunfilecheck Warning: File `main.loa' has changed. Rerun to get it right.")
+        tex.build()
+        tex.build()
+        self.assertEqual(tex.calls, ["pdflatex", "pdflatex"])
 
-        # same citations: no bibtex, one pass
-        self.write("main.tex", DOC % ("\\cite{knuth} again.", cite))
-        result = self.build()
-        self.assertEqual(tools(result, "bibtex"), [])
-        self.assertEqual(len(tools(result, self.engine)), 1)
+    def test_bibtex_runs_only_when_what_it_reads_changes(self):
+        write(os.path.join(self.root, "refs.bib"), "@book{knuth, title={TeX}}")
+        aux = "\\citation{knuth}\n\\bibdata{refs}\n\\bibstyle{plain}\n"
+        tex = FakeTeX(self.root, lambda n: aux)
+        tex.build()
+        self.assertIn("bibtex", tex.calls)
+        tex.build()
+        self.assertNotIn("bibtex", tex.calls)
+        write(os.path.join(self.root, "refs.bib"), "@book{knuth, title={The TeXbook}}")
+        tex.build()
+        self.assertIn("bibtex", tex.calls)
 
-        # a new citation: bibtex again, and the reference resolves
-        self.write("main.tex", DOC % ("\\cite{knuth} and \\cite{lamport}.", cite))
-        self.assertEqual(len(tools(self.build(), "bibtex")), 1)
-        self.assertNotIn("Citation `lamport'", self.log())
-
-        # an edited .bib: bibtex again
-        self.write("refs.bib", BIB.replace("1984", "1983"))
-        self.assertEqual(len(tools(self.build(), "bibtex")), 1)
+    def test_a_citation_in_an_included_chapter_reruns_bibtex(self):
+        write(os.path.join(self.root, "refs.bib"), "@book{knuth, title={TeX}}")
+        write(os.path.join(self.root, "chapters", "intro.aux"), "\\relax\n")
+        aux = "\\bibdata{refs}\n\\bibstyle{plain}\n\\@input{chapters/intro.aux}\n"
+        tex = FakeTeX(self.root, lambda n: aux)
+        tex.build()
+        tex.build()
+        self.assertNotIn("bibtex", tex.calls)
+        # \include{chapters/intro} gained a \cite: its citation is in the chapter's .aux.
+        write(os.path.join(self.root, "chapters", "intro.aux"), "\\relax\n\\citation{knuth}\n")
+        tex.build()
+        self.assertIn("bibtex", tex.calls)
 
     def test_a_failing_bibliography_tool_is_reported_not_rerun(self):
-        # a bibtex that always fails and counts its runs, like a biber that does not match biblatex
-        bindir = os.path.join(self.dir, "bin")
-        os.mkdir(bindir)
-        tool = os.path.join(bindir, "bibtex")
-        with open(tool, "w") as f:
-            f.write('#!/bin/sh\necho run >> "%s/runs"\necho "I couldn\'t open style file nope.bst"\nexit 2\n' % self.dir)
-        os.chmod(tool, 0o755)
-        path = os.environ["PATH"]
-        os.environ["PATH"] = bindir + os.pathsep + path
-        self.addCleanup(os.environ.__setitem__, "PATH", path)
+        write(os.path.join(self.root, "main.bcf"), "<bcf:datasource type=\"file\">refs.bib</bcf:datasource>")
+        tex = FakeTeX(self.root, lambda n: "\\relax\n", bib_code=2, bib_out="ERROR - Error: Found biblatex control file version 3.10, expected 3.11")
+        first = tex.build()
+        self.assertIn("biber", tex.calls)
+        self.assertIn("control file version", next(s for s in first["steps"] if s["tool"] == "biber")["message"])
+        second = tex.build()
+        self.assertNotIn("biber", tex.calls)
+        self.assertIn("control file version", next(s for s in second["steps"] if s["tool"] == "biber")["message"])
 
-        self.write("refs.bib", BIB)
-        cite = "\\bibliographystyle{nope}\\bibliography{refs}"
-        self.write("main.tex", DOC % ("\\cite{knuth}", cite))
-        for _ in range(2):
-            step = tools(self.build(), "bibtex")[0]
-            self.assertIn("nope.bst", step["message"])
-        with open(os.path.join(self.dir, "runs")) as f:
-            self.assertEqual(len(f.read().split()), 1)  # the second build did not run it again
+    def test_xelatex_makes_the_pdf_once_from_the_xdv(self):
+        # A first build: the .aux appears on pass 1, pass 2 confirms it.
+        tex = FakeTeX(self.root, lambda n: "\\newlabel{a}{{1}{1}}\n")
+        result = tex.build("xelatex")
+        self.assertEqual(tex.calls, ["xelatex", "xelatex", "xdvipdfmx"])
+        self.assertIsNone(result["error"])
 
-        # changed citations: it is tried again
-        self.write("main.tex", DOC % ("\\cite{lamport}", cite))
-        self.build()
-        with open(os.path.join(self.dir, "runs")) as f:
-            self.assertEqual(len(f.read().split()), 2)
+    def test_xelatex_errors_are_not_hidden_by_the_pdf_step(self):
+        tex = FakeTeX(self.root, lambda n: "\\relax\n", log="./main.tex:3: Undefined control sequence.\nl.3 \\foo\n", engine_code=1)
+        result = tex.build("xelatex")
+        self.assertEqual(tex.calls[-1], "xdvipdfmx")
+        self.assertIsNotNone(result["error"])
+        self.assertIn("Undefined control sequence", result["error"])
 
-
-class XeLaTeXBuildTest(BuildTest):
-    engine = "xelatex"
-
-    def test_pdf_is_made_once_from_the_xdv(self):
-        if not shutil.which("xdvipdfmx"):
-            self.skipTest("xdvipdfmx is not installed")
-        self.write("main.tex", DOC % ("Text.", ""))
-        result = self.build()
-        self.assertGreaterEqual(len(tools(result, "xelatex")), 1)
-        self.assertEqual(len(tools(result, "xdvipdfmx")), 1)
-        self.assertEqual(result["steps"][-1]["tool"], "xdvipdfmx")
-        self.assertTrue(os.path.isfile(os.path.join(self.dir, "main.synctex.gz")))
+    def test_without_xdvipdfmx_xelatex_writes_the_pdf_itself(self):
+        tex = FakeTeX(self.root, lambda n: "\\relax\n")
+        tex.build("xelatex", tools=())
+        self.assertNotIn("xdvipdfmx", tex.calls)
 
 
 if __name__ == "__main__":

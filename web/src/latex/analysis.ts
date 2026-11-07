@@ -161,3 +161,15 @@ export function wordCount(src: string): number {
     .replace(/[{}[\]~\\&%#^_]/g, ' ');
   return text.split(/\s+/).filter((w) => /[\p{L}\p{N}]/u.test(w)).length;
 }
+
+/**
+ * Whether `line` of a .tex file is in its preamble (before \begin{document}).
+ * SyncTeX attributes text to where a macro is *defined*, so a cursor on a
+ * \newcommand line would "be" wherever the macro is used (often page 2).
+ */
+export function inPreamble(text: string | undefined, line: number): boolean {
+  if (!text) return false;
+  const m = /^[^%\n]*\\begin\{document\}/m.exec(text);
+  if (!m) return false;
+  return line <= text.slice(0, m.index).split('\n').length;
+}

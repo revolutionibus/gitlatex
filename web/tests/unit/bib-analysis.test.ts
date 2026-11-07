@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { formatEntry, mergeBib, parseBib } from '../../src/latex/bib';
-import { labels, loadedPackages, outline, packageInsertion, userMacros, wordCount } from '../../src/latex/analysis';
+import { inPreamble, labels, loadedPackages, outline, packageInsertion, userMacros, wordCount } from '../../src/latex/analysis';
 
 describe('parseBib', () => {
   it('parses braces, quotes, nesting and bare values', () => {
@@ -89,5 +89,22 @@ describe('mergeBib', () => {
   });
   it('starts an empty file without a leading blank line', () => {
     expect(mergeBib('', '@comment{jabref}\n@misc{a, title={A}}').text).toBe('@misc{a, title={A}}\n');
+  });
+});
+
+describe('inPreamble', () => {
+  const tex = String.raw`\documentclass{article}
+\newcommand{\me}{Ada}
+% \begin{document} in a comment
+\begin{document}
+Hello \me.
+\end{document}
+`;
+  it('is true up to and including the \\begin{document} line, ignoring comments', () => {
+    expect([1, 2, 3, 4].map((l) => inPreamble(tex, l))).toEqual([true, true, true, true]);
+    expect([5, 6].map((l) => inPreamble(tex, l))).toEqual([false, false]);
+  });
+  it('is false for a file without a preamble (an \\input chapter)', () => {
+    expect(inPreamble('\\section{One}\nText.\n', 1)).toBe(false);
   });
 });

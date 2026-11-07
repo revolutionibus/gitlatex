@@ -17,7 +17,7 @@ import { editorBridge } from '../editor/bridge';
 import { monaco } from '../editor/monaco';
 import { parseBibtexLog, parseTexLog } from '../latex/log-parser';
 import { SyncTex } from '../latex/synctex';
-import { packageInsertion } from '../latex/analysis';
+import { inPreamble, packageInsertion } from '../latex/analysis';
 import { passOptionsFix, type QuickFix } from '../latex/explain';
 import type { SlashCommand } from '../editor/slash-commands';
 import type { CompileResult } from '../engine/protocol';
@@ -25,9 +25,10 @@ import type { CompilerMode, Diagnostic, ProjectMeta } from '../types';
 import { basename, dirname, isTextPath, joinPath, normalisePath, relativePath, stripExt } from '../utils/paths';
 import { BUILD_OUTPUT, KEEP } from './workspace';
 import { TEMPLATES } from '../templates';
-import { startCollab, stopCollab } from '../collab/session';
-import { moveCollabConfig, readCollabConfig, readCollabUser, sameHost, writeCollabAdmin, writeCollabConfig, writeCollabUser, type CollabAdmin, type CollabConfig, type CollabUser } from '../collab/config';
+import { locatePeer, setCollabUser, startCollab, stopCollab } from '../collab/session';
+import { moveCollabConfig, readCollabColor, readCollabConfig, sameHost, splitHost, writeCollabAdmin, writeCollabColor, writeCollabConfig, type CollabAdmin, type CollabConfig, type CollabUser } from '../collab/config';
 import { deleteRoom, ensureRoom, rotateRoomToken } from '../collab/admin';
+import { baseKey, clearBase } from '../collab/base';
 
 // ---------------------------------------------------------------------------
 // Engine
@@ -102,7 +103,7 @@ export async function refreshProjects() {
   const { repos } = await server.listProjects();
   const projects: ProjectMeta[] = repos.map((r) => {
     const t = r.lastModified ? Date.parse(r.lastModified) : 0;
-    return { id: r.name, name: r.name, createdAt: t, updatedAt: t, mainFile: '', engine: 'pdftex', hasGit: r.hasGit };
+    return { id: r.name, name: r.name, createdAt: t, updatedAt: t, mainFile: '', engine: 'pdftex', hasGit: r.hasGit, remoteUrl: r.remoteUrl };
   });
   projects.sort((a, b) => b.updatedAt - a.updatedAt);
   setState({ projects });
@@ -157,7 +158,11 @@ export async function openProject(id: string) {
   }
   void refreshScm();
   const collab = readCollabConfig(next.project.id);
-  if (collab.enabled && collab.host && collab.token) void rejoinCollab(next, collab);
+  if (collab.enabled && collab.host && collab.token) {
+    void collabUser().then((user) => {
+      if (ws === next) startCollab(next, collab, user);
+    });
+  }
   // Show the PDF from the last build straight away, as the classic UI did.
   void showExistingPdf(next);
   void warmUpEngine();
@@ -210,24 +215,31 @@ function persistTabs() {
 // Live collaboration (optional, per project)
 // ---------------------------------------------------------------------------
 
-/** Share the open project live: save the settings and connect. */
-export async function joinCollab(config: CollabConfig, user: CollabUser) {
-  if (!ws) return;
-  writeCollabUser(user);
-  writeCollabConfig(ws.project.id, { ...config, enabled: true });
-  await ws.flush();
-  startCollab(ws, { ...config, enabled: true }, user);
+/** Your git identity for the open project: collaborators see you by your git user.name. */
+export async function gitIdentity(): Promise<{ name: string; configured: boolean }> {
+  try {
+    const res = await fetch('/review/me');
+    const data = (await res.json()) as { user?: { name?: string; configured?: boolean } };
+    if (data.user?.configured && data.user.name) return { name: data.user.name, configured: true };
+  } catch {
+    /* fall through */
+  }
+  return { name: 'Anonymous', configured: false };
 }
 
-/** Reconnect a shared project on open, signed with the current GitHub username. */
-async function rejoinCollab(project: Workspace, config: CollabConfig) {
-  const user = readCollabUser();
-  const login = await server.scm.githubUser().then((r) => r.login, () => null);
-  if (login && login !== user.name) {
-    user.name = login;
-    writeCollabUser(user);
-  }
-  if (user.name && ws === project) startCollab(project, config, user);
+async function collabUser(): Promise<CollabUser> {
+  return { name: (await gitIdentity()).name, color: readCollabColor() };
+}
+
+/** Share the open project live in a room: save the settings and connect. */
+export async function joinCollab(config: Omit<CollabConfig, 'enabled'>) {
+  if (!ws) return;
+  const current = ws;
+  const full = { ...config, enabled: true };
+  writeCollabConfig(current.project.id, full);
+  await current.flush();
+  const user = await collabUser();
+  if (ws === current) startCollab(current, full, user);
 }
 
 /** Stop sharing the open project. Files stay as they are on disk. */
@@ -238,41 +250,56 @@ export function leaveCollab(quiet = false) {
   if (!quiet) toast({ kind: 'info', title: 'Left the live session', message: 'Your files stay as they are on disk.' });
 }
 
-/** Sign in to (or out of) a relay as its owner. Kept in this browser for every project. */
+/** Jump the editor to where another person in the room is typing. */
+export function goToPeer(id: number) {
+  const peer = getState().collab?.peers.find((p) => p.id === id);
+  const at = locatePeer(id);
+  if (!at || !ws?.get(at.path)) {
+    toast({ kind: 'info', title: `${peer?.name ?? 'They'} ${at ? 'are in a file that is not in your copy' : 'have no file open right now'}` });
+    return;
+  }
+  openFile(at.path, at.line ?? 1, at.column);
+}
+
+export function setCollabColor(color: string) {
+  writeCollabColor(color);
+  setState({ collabColor: color });
+  void collabUser().then(setCollabUser);
+}
+
+/** Sign in to (or, with null, out of) the relay as its owner. Global: used by every project. */
 export function setCollabAdmin(admin: CollabAdmin | null) {
   writeCollabAdmin(admin);
   setState({ collabAdmin: admin });
 }
 
-/** Whether the open project is shared in this room of this relay. */
+/** Is the open project shared in this room of this relay? */
 function sharesRoom(admin: CollabAdmin, room: string) {
   if (!ws) return false;
   const c = readCollabConfig(ws.project.id);
   return c.enabled && c.room === room && sameHost(c.host, admin.host);
 }
 
-/** Owner: create the project's room (or reuse it, keeping its token) and go live in it. */
-export async function hostCollab(admin: CollabAdmin, room: string, user: CollabUser) {
+/** Owner: create (or reuse) the room on the relay and share the open project in it. */
+export async function hostCollab(admin: CollabAdmin, room: string) {
   const rec = await ensureRoom(admin, room);
   setCollabAdmin(admin);
-  await joinCollab({ enabled: true, host: admin.host, room: rec.room, token: rec.token }, user);
+  await joinCollab({ host: admin.host, room: rec.room, token: rec.token });
   return rec;
 }
 
 /** Owner: give a room a new token. Everyone in it is disconnected until they get the new invite. */
 export async function rotateCollabRoom(admin: CollabAdmin, room: string) {
   const rec = await rotateRoomToken(admin, room);
-  if (ws && sharesRoom(admin, room)) {
-    const config = { ...readCollabConfig(ws.project.id), token: rec.token };
-    writeCollabConfig(ws.project.id, config);
-    startCollab(ws, config, readCollabUser());
-  }
+  if (sharesRoom(admin, room)) await joinCollab({ host: admin.host, room, token: rec.token });
   return rec;
 }
 
-/** Owner: delete a room and its shared text from the relay. Everyone's files stay on disk. */
+/** Owner: delete a room and its shared text on the relay. Everyone's files stay on their disks. */
 export async function deleteCollabRoom(admin: CollabAdmin, room: string) {
   await deleteRoom(admin, room);
+  // The room's history is gone; a room made later under the same name starts fresh.
+  await clearBase(baseKey(splitHost(admin.host).host, room));
   if (sharesRoom(admin, room)) leaveCollab(true);
 }
 
@@ -535,11 +562,19 @@ export function confirmDeleteProject(id: string) {
     confirm: 'Delete project',
     danger: true,
     onConfirm: async () => {
-      if (ws?.project.id === id) await closeProject();
-      await server.deleteProject(id);
-      Workspace.forget(id);
-      moveCollabConfig(id, null);
-      await refreshProjects();
+      setState({ deleting: [...getState().deleting, id] });
+      try {
+        if (ws?.project.id === id) await closeProject();
+        await server.deleteProject(id);
+        Workspace.forget(id);
+        moveCollabConfig(id, null);
+        await refreshProjects();
+        toast({ kind: 'success', title: `Deleted ${id}` });
+      } catch (err) {
+        toast({ kind: 'error', title: `Could not delete ${id}`, message: err instanceof Error ? err.message : String(err) });
+      } finally {
+        setState({ deleting: getState().deleting.filter((d) => d !== id) });
+      }
     },
   });
 }
@@ -744,7 +779,10 @@ export async function compile(opts: { clean?: boolean; reason?: 'manual' | 'auto
   clearTimeout(autoTimer);
   if (!ws) return;
   const project = ws.project;
+  const sourcePath = getState().activePath;
+  const sourceLine = editorBridge.cursorLine() ?? undefined;
   const backend = await resolveCompiler(project.engine);
+  if (ws?.project !== project) return;
   if (opts.reason === 'open' && !getState().settings.autoCompile && (backend !== 'browser' || engine.state.state !== 'ready')) return;
   if (running) {
     pending = { clean: !!opts.clean || !!pending?.clean };
@@ -785,14 +823,22 @@ export async function compile(opts: { clean?: boolean; reason?: 'manual' | 'auto
         synctex = null;
       }
     }
+    if (ws !== current || generation !== compileGeneration) return;
+    let cursorPage: number | null = null;
+    if ((result.status === 'success' || result.status === 'warnings') && sourcePath && sourceLine && /\.tex$/i.test(sourcePath) && !inPreamble(current.getText(sourcePath), sourceLine)) {
+      try { cursorPage = synctex?.forward(sourcePath, sourceLine)[0]?.page ?? null; }
+      catch { /* Navigation is optional if the source has no usable mapping. */ }
+    }
     const prev = getState().compile;
     const { pdf, synctex: _s, ...rest } = result;
+    if (pdf) setState({ pdfTarget: null });
     void _s;
     patchCompile({
       status: result.status,
       result: { id: 0, ...rest },
       pdf: pdf ?? prev.pdf,
       pdfVersion: pdf ? prev.pdfVersion + 1 : prev.pdfVersion,
+      cursorPage: pdf ? cursorPage : prev.cursorPage,
       pdfFromCurrentRun: !!pdf,
       synctex: pdf ? synctex : prev.synctex,
       diagnostics,
@@ -801,8 +847,6 @@ export async function compile(opts: { clean?: boolean; reason?: 'manual' | 'auto
       ...(backend !== 'browser' ? { console: result.transcript } : {}),
     });
     applyMarkers();
-    // a compile from writing (manual or auto) shows where the cursor is in the new PDF
-    if (opts.reason !== 'open' && pdf && synctex) followCursor(synctex);
     if (result.fetched.length) {
       const labels = new Map((getState().engine.info?.collections ?? []).map((c) => [c.id, c.label.replace(/\s*\(.*\)$/, '')]));
       const names = result.fetched.map((f) => labels.get(f) ?? f.replace(/^font:/, ''));
@@ -851,7 +895,7 @@ export function applyMarkers() {
           source: d.source === 'bibtex' ? 'BibTeX' : 'TeX',
         };
       });
-    monaco.editor.setModelMarkers(model, 'texbrowser', markers);
+    monaco.editor.setModelMarkers(model, 'gitlatex', markers);
   }
 }
 
@@ -872,15 +916,6 @@ export function forwardSearch(line?: number) {
   const rects = synctex.forward(path, line);
   if (!rects.length) toast({ kind: 'info', title: 'No PDF location for this line' });
   else setState({ pdfTarget: { rects, nonce: Date.now() } });
-}
-
-/** Scroll the PDF to the cursor's position, quietly (nothing happens when it has none). */
-function followCursor(synctex: SyncTex) {
-  const path = getState().activePath;
-  const line = path ? editorBridge.cursorLine() : null;
-  if (!path || !line) return;
-  const rects = synctex.forward(path, line);
-  if (rects.length) setState({ pdfTarget: { rects, nonce: Date.now() } });
 }
 
 export function inverseSearch(page: number, x: number, y: number) {

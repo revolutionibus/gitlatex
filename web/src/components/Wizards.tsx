@@ -4,7 +4,7 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Table2, Braces, ImagePlus, BookMarked, Hash, Upload, Search, Sigma, Plus } from 'lucide-react';
-import { closeDialog, toast, useStore } from '../state/store';
+import { closeDialog, getZoteroKey, openDialog, toast, useStore } from '../state/store';
 import { addFiles, ensurePackage, includePathFor, workspace } from '../state/actions';
 import { editorBridge } from '../editor/bridge';
 import { CIT, mathAt } from '../editor/providers';
@@ -261,6 +261,8 @@ function lastCiteSource(): CiteSource {
 
 /** The keys typed so far when the cursor is already inside \cite{…}, else null. */
 function openCiteArgument(): string | null {
+  // The LyX-style editor has no \cite{…} source to type into.
+  if (editorBridge.cursorLineIsElsewhere()) return null;
   const e = editorBridge.get();
   const pos = e?.getPosition();
   const model = e?.getModel();
@@ -330,7 +332,7 @@ function CiteWizard({ initialSource, initialQuery }: { initialSource?: CiteSourc
   const citeFromZotero = async () => {
     setBusy(true);
     try {
-      const { bibtex } = await zotero.export(zsel.map((i) => i.id), zsource, pkgs.has('biblatex'));
+      const { bibtex } = await zotero.export(zsel.map((i) => i.id), zsource, pkgs.has('biblatex'), getZoteroKey());
       const keys = addToBib(bibtex);
       insertAndClose(citeSnippet([...new Set([...sel, ...keys])]));
     } catch (err) {
@@ -428,27 +430,33 @@ function ZoteroPicker({ initialQuery = '', selected, onChange, onSource }: { ini
   const [mode, setMode] = useState<ZoteroSource | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [retry, setRetry] = useState(0);
+  // From the first keystroke until the answer arrives (debounce included), so typing feels acknowledged.
+  const [searching, setSearching] = useState(false);
 
   useEffect(() => {
     setStatus(null);
-    zotero.status().then(setStatus, (err) => setStatus({ running: false, betterBibtex: false, localApi: false, message: err instanceof Error ? err.message : String(err) }));
+    zotero.status(getZoteroKey()).then(setStatus, (err) => setStatus({ running: false, betterBibtex: false, localApi: false, web: false, username: null, message: err instanceof Error ? err.message : String(err) }));
   }, [retry]);
 
-  const ready = !!status && (status.betterBibtex || status.localApi);
+  const ready = !!status && (status.betterBibtex || status.localApi || status.web);
   useEffect(() => {
     if (!ready) return;
     let stale = false;
+    setSearching(true);
     const t = setTimeout(() => {
-      zotero.search(q).then(
-        (r) => {
-          if (stale) return;
-          setItems(r.items);
-          setMode(r.source);
-          setError(null);
-          onSource(r.source);
-        },
-        (err) => !stale && setError(err instanceof Error ? err.message : String(err)),
-      );
+      zotero
+        .search(q, getZoteroKey())
+        .then(
+          (r) => {
+            if (stale) return;
+            setItems(r.items);
+            setMode(r.source);
+            setError(null);
+            onSource(r.source);
+          },
+          (err) => !stale && setError(err instanceof Error ? err.message : String(err)),
+        )
+        .finally(() => !stale && setSearching(false));
     }, 250);
     return () => {
       stale = true;
@@ -461,25 +469,31 @@ function ZoteroPicker({ initialQuery = '', selected, onChange, onSource }: { ini
     return (
       <div className="space-y-3 rounded-lg border border-line p-4 text-[13px] text-muted">
         <p>{status.message ?? 'Zotero is not available.'}</p>
-        <Button onClick={() => setRetry((n) => n + 1)}>Try again</Button>
+        {!getZoteroKey() && <p className="text-[12px]">Or add a zotero.org API key to search your synced library without the app.</p>}
+        <div className="flex gap-2">
+          <Button onClick={() => setRetry((n) => n + 1)}>Try again</Button>
+          <Button variant="ghost" onClick={() => openDialog({ type: 'settings', section: 'zotero' })}>Zotero settings</Button>
+        </div>
       </div>
     );
   }
 
+  // Name the library on each item only when results come from more than one.
+  const manyLibraries = new Set(items?.map((it) => it.library)).size > 1;
   const toggle = (it: ZoteroItem) => onChange(selected.some((s) => s.id === it.id) ? selected.filter((s) => s.id !== it.id) : [...selected, it]);
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2">
-        <Search className="size-4 text-faint" />
-        <TextInput autoFocus placeholder="Search your Zotero library by title, author, year…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {searching ? <Spinner className="size-4 shrink-0 text-accent" /> : <Search className="size-4 shrink-0 text-faint" />}
+        <TextInput autoFocus placeholder="Search your Zotero libraries by title, author, year…" value={q} onChange={(e) => setQ(e.target.value)} aria-busy={searching} />
       </div>
-      <div className="max-h-72 overflow-y-auto rounded-lg border border-line">
+      <div className={clsx('max-h-72 overflow-y-auto rounded-lg border border-line transition-opacity', searching && items?.length && 'opacity-60')} aria-busy={searching}>
         {error ? (
           <div className="p-4 text-center text-xs text-danger">{error}</div>
         ) : items === null ? (
-          <div className="flex justify-center p-4"><Spinner /></div>
+          searching ? null : <div className="flex justify-center p-4"><Spinner /></div>
         ) : !items.length ? (
-          <div className="p-4 text-center text-xs text-muted">{q.trim() ? 'No matches.' : 'Type to search your Zotero library.'}</div>
+          searching ? null : <div className="p-4 text-center text-xs text-muted">{q.trim() ? 'No matches.' : 'Type to search your Zotero libraries.'}</div>
         ) : (
           items.map((it) => {
             const on = selected.some((s) => s.id === it.id);
@@ -493,7 +507,10 @@ function ZoteroPicker({ initialQuery = '', selected, onChange, onSource }: { ini
                 <span className="min-w-0">
                   <span className="block text-[13px] font-medium text-fg">{it.title || '(untitled)'}</span>
                   <span className="block truncate text-[11px] text-muted">{[it.creators.join(', '), it.year && `(${it.year})`, it.where].filter(Boolean).join(' ')}</span>
-                  {it.key && <span className="font-mono text-[10.5px] text-faint">{it.key}</span>}
+                  <span className="flex flex-wrap items-center gap-x-2">
+                    {it.key && <span className="font-mono text-[10.5px] text-faint">{it.key}</span>}
+                    {manyLibraries && it.library && <span className="rounded bg-hover px-1.5 text-[10.5px] text-muted">{it.library}</span>}
+                  </span>
                 </span>
               </button>
             );
@@ -501,7 +518,11 @@ function ZoteroPicker({ initialQuery = '', selected, onChange, onSource }: { ini
         )}
       </div>
       <p className="text-[11px] text-faint">
-        {mode === 'betterBibtex' ? 'Using Better BibTeX citation keys.' : 'Using Zotero’s local API. Install Better BibTeX for stable citation keys.'} Selected items are added to the project’s .bib file.
+        {mode === 'betterBibtex'
+          ? 'Using Better BibTeX citation keys.'
+          : mode === 'web'
+            ? `Searching your zotero.org libraries${status.username ? ` (${status.username})` : ''}, personal and group, as last synced.`
+            : 'Searching your personal and group libraries through Zotero’s local API. Install Better BibTeX for stable citation keys.'} Selected items are added to the project’s .bib file.
       </p>
     </div>
   );

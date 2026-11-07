@@ -11,7 +11,6 @@
     POST /api/scm/pull | push | sync | fetch
     GET  /api/scm/branches          POST /api/scm/checkout {name, create?}
     GET  /api/scm/publish-options   POST /api/scm/publish {url? | name?, private?}
-    GET  /api/scm/github-user       {login} (null when unknown); live collaboration signs with it
     GET  /api/scm/diff?path=&staged=1
 
 Pull and push rebase like /pull and /push (services/sync.py), but a real
@@ -201,11 +200,6 @@ def checkout(repo):
 @bp.route("/api/scm/publish-options")
 def publish_options():
     return jsonify(gh=scm.gh_ready())
-
-
-@bp.route("/api/scm/github-user")
-def github_user():
-    return jsonify(login=scm.github_user())
 
 
 @bp.route("/api/scm/publish", methods=["POST"])

@@ -1,252 +1,233 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { parseTex, macrosOf, theoremsOf, graphicsPaths } from '../../src/lyx/tex-import';
-import { exportTex, genRun, ensurePreamble } from '../../src/lyx/tex-export';
-import { latexOf, mkBlock, mkSpecial } from '../../src/lyx/model';
-import { tabularOp } from '../../src/lyx/tabular';
+import type { Node as PMNode } from 'prosemirror-model';
+import { readTex } from '../../src/lyx/tex-reader';
+import { writeTex } from '../../src/lyx/tex-writer';
+import { schema } from '../../src/lyx/schema';
 
 const DOC = String.raw`\documentclass[11pt]{article}
 \usepackage{amsmath,amsthm}
-\newtheorem{thm}{Theorem}
-\newcommand{\R}{\mathbb{R}}
+\newtheorem{hyp}{Hypothesis}
 \begin{document}
-\title{A note}
-\author{Jane Doe \and John Roe}
+
+\title{A Test}
 \maketitle
 
-% Introduction starts here
+% A comment before the introduction.
 \section{Introduction}\label{sec:intro}
-Let $f:[a,b]\to\R$ be continuous,
-and let \emph{F} be an antiderivative.\footnote{See \cite[p.~3]{knuth84}.}
-Then
-\begin{equation}
-  \int_a^b f = F(b)-F(a) \label{eq:ftc}
-\end{equation}
-by Theorem~\ref{thm:main}.
+Some \emph{emphasised} and \textbf{bold \emph{nested}} text with $x^2$ inline,
+a footnote\footnote{See \cite[p.~3]{knuth}.}, a reference to
+Section~\ref{sec:intro} and \url{https://example.com}. Costs 5\% \& more\ldots{}
+Line one\\
+line two.
 
-\begin{thm}[Main]\label{thm:main}
-Every \textbf{continuous} function is integrable.
-\end{thm}
+A paragraph with a display
+\[
+  E = mc^2
+\]
+that continues after it.
 
 \begin{itemize}
   \item First item
-  \item Second item
-  \begin{enumerate}
-    \item Nested
+  \item Second item with a nested list:
+  \begin{enumerate}[label=(\alph*)]
+    \item Inner one
+    \item Inner two
   \end{enumerate}
+  \item[Custom] Labelled item
 \end{itemize}
+
+\begin{hyp}[Main]
+Our hypothesis.
+
+It has two paragraphs.
+\end{hyp}
+
+\begin{proof}
+Obvious.
+\end{proof}
+
+\begin{equation}
+  a + b = c \label{eq:sum}
+\end{equation}
 
 \begin{figure}[ht]
   \centering
-  \includegraphics[width=0.5\linewidth]{fig/plot.png}
-  \caption{A plot}\label{fig:plot}
+  \includegraphics[width=0.5\linewidth]{plot}
+  \caption{A plot.}
 \end{figure}
 
-\begin{tabular}{cc}
-a & b \\
-\end{tabular}
+\begin{quote}
+To be or not to be.
+\end{quote}
 
+\href{https://gitlatex.org}{Our \textit{site}} and \LaTeX{} rule.
 \end{document}
 `;
 
-function load(text: string) {
-  const doc = parseTex(text);
-  const ed = document.createElement('div');
-  doc.blocks.forEach((b) => ed.append(b));
-  const envFor = (layout: string) => Object.entries(doc.theorems).find(([, l]) => l === layout)?.[0] ?? null;
-  const blocks = () => [...ed.children] as HTMLElement[];
-  // what the editor does right after loading: remember each chunk's generated LaTeX
-  for (const [i, ch] of doc.chunks.entries()) ch.gen = genRun(blocks().filter((b) => b.dataset.chunk === String(i)), {}, envFor);
-  const save = () => exportTex(blocks(), { head: doc.head, tail: doc.tail, trailing: doc.trailing, chunks: doc.chunks, envFor }).text;
-  return { doc, ed, blocks, save };
-}
+const children = (doc: PMNode) => {
+  const out: PMNode[] = [];
+  doc.forEach((c) => out.push(c));
+  return out;
+};
 
-describe('LyX-style editor: LaTeX round trip', () => {
-  it('writes an untouched file back byte for byte', () => {
-    const { save } = load(DOC);
-    expect(save()).toBe(DOC);
+/** The document with child `i` replaced by `node` (every other child keeps its identity). */
+const replaceChild = (doc: PMNode, i: number, node: PMNode) => doc.copy(doc.content.replaceChild(i, node));
+const withText = (p: PMNode, text: string) => p.type.create(p.attrs, text ? schema.text(text) : null);
+
+describe('LyX-style editor: reading and writing LaTeX', () => {
+  it('writes an untouched document back byte for byte', () => {
+    const read = readTex(DOC);
+    expect(writeTex(read, read.doc)).toBe(DOC);
   });
 
-  it('reads layouts, formulas and insets', () => {
-    const { blocks } = load(DOC);
-    const types = blocks().map((b) => b.dataset.type);
-    expect(types).toContain('Title');
-    expect(types).toContain('Author');
-    expect(types).toContain('Section');
-    expect(types).toContain('Theorem');
-    expect(types.filter((t) => t === 'Itemize')).toHaveLength(2);
-    const nested = blocks().find((b) => b.dataset.type === 'Enumerate')!;
-    expect(nested.dataset.depth).toBe('1');
-    const disp = blocks().find((b) => b.dataset.type === '_display')!;
-    expect(disp.dataset.numbered).toBe('1');
-    expect(disp.dataset.label).toBe('eq:ftc');
-    const section = blocks().find((b) => b.dataset.type === 'Section')!;
-    expect(section.querySelector('[data-inset="Label"]')?.getAttribute('data-name')).toBe('sec:intro');
-    const para = disp.previousElementSibling as HTMLElement;
-    expect(latexOf(para.querySelector('math-field'))).toBe('f:[a,b]\\to\\R');
-    expect(para.querySelector('[data-inset="Foot"] [data-inset="Cite"]')?.getAttribute('data-keys')).toBe('knuth84');
-    expect((disp.nextElementSibling as HTMLElement).dataset.cont).toBe('1');
-    const thm = blocks().find((b) => b.dataset.type === 'Theorem')!;
-    expect(thm.dataset.env).toBe('thm');
-    expect(thm.dataset.arg).toBe('Main');
-    const float = blocks().find((b) => b.querySelector('[data-inset="Float"]'))!;
-    expect(float.querySelector('[data-inset="Graphics"]')?.getAttribute('data-path')).toBe('fig/plot.png');
-    expect(float.querySelector('[data-inset="Caption"]')).not.toBeNull();
-    const table = blocks().find((b) => b.querySelector('[data-inset="Tabular"]'))!;
-    expect([...table.querySelectorAll('td')].map((td) => td.textContent)).toEqual(['a', 'b']);
-    // unknown constructs are TeX code, kept verbatim
-    expect(blocks().some((b) => b.querySelector('.ibody')?.textContent === '% Introduction starts here')).toBe(true);
+  it('round-trips every built-in template unchanged', () => {
+    const dir = path.join(__dirname, '../../src/templates/files');
+    const files: string[] = [];
+    const walk = (d: string) =>
+      fs.readdirSync(d, { withFileTypes: true }).forEach((e) => (e.isDirectory() ? walk(path.join(d, e.name)) : e.name.endsWith('.tex') && files.push(path.join(d, e.name))));
+    walk(dir);
+    expect(files.length).toBeGreaterThan(5);
+    for (const f of files) {
+      const text = fs.readFileSync(f, 'utf8');
+      const read = readTex(text);
+      expect(writeTex(read, read.doc), path.relative(dir, f)).toBe(text);
+    }
   });
 
-  it('rewrites only the edited paragraph', () => {
-    const { blocks, save } = load(DOC);
-    const thm = blocks().find((b) => b.dataset.type === 'Theorem')!;
-    thm.querySelector('strong')!.textContent = 'differentiable';
-    const out = save();
-    expect(out).toContain('\\begin{thm}[Main]\n\\label{thm:main} Every \\textbf{differentiable} function is integrable.\n\\end{thm}');
-    // everything else is unchanged
-    expect(out.replace(/\\begin\{thm\}[\s\S]*?\\end\{thm\}/, '')).toBe(DOC.replace(/\\begin\{thm\}[\s\S]*?\\end\{thm\}/, ''));
+  it('reads layouts, depths and insets as LyX shows them', () => {
+    const { doc } = readTex(DOC);
+    const pars = children(doc).filter((n) => n.type === schema.nodes.paragraph);
+    const at = (text: string) => pars.find((p) => p.textContent.includes(text))!;
+    expect(at('A Test').attrs.layout).toBe('Title');
+    expect(at('Introduction').attrs.layout).toBe('Section');
+    expect(at('First item').attrs).toMatchObject({ layout: 'Itemize', depth: 0, startsEnv: true });
+    expect(at('Inner one').attrs).toMatchObject({ layout: 'Enumerate', depth: 1, envOpt: 'label=(\\alph*)' });
+    expect(at('Labelled item').attrs).toMatchObject({ layout: 'Itemize', item: 'Custom' });
+    expect(at('Our hypothesis').attrs).toMatchObject({ layout: 'Hypothesis', env: 'hyp', envOpt: 'Main' });
+    expect(at('two paragraphs').attrs.layout).toBe('Hypothesis');
+    expect(at('Obvious').attrs.layout).toBe('Proof');
+    expect(at('To be').attrs.layout).toBe('Quote');
+    expect(at('continues after it').attrs.joinPrev).toBe(true);
+
+    const intro = at('emphasised');
+    const kinds = new Set<string>();
+    intro.descendants((n) => void kinds.add(n.type.name));
+    for (const k of ['math_inline', 'footnote', 'cite', 'ref', 'url', 'hard_break']) expect(kinds).toContain(k);
+    expect(intro.textContent).toContain('5% & more…');
+
+    const displays = children(doc).filter((n) => n.type === schema.nodes.math_display);
+    expect(displays.map((d) => [d.attrs.env, d.attrs.label])).toEqual([['\\[', null], ['equation', 'eq:sum']]);
+    const figure = children(doc).find((n) => n.type === schema.nodes.float)!;
+    expect(figure.attrs).toMatchObject({ env: 'figure', placement: 'ht' });
+    const inFigure: string[] = [];
+    figure.descendants((n) => void inFigure.push(n.type.name === 'paragraph' ? `p:${n.attrs.layout}` : n.type.name));
+    expect(inFigure).toEqual(expect.arrayContaining(['ert_block', 'graphics', 'p:Caption']));
+    expect(children(doc).find((n) => n.type === schema.nodes.note)?.textContent).toBe('A comment before the introduction.');
   });
 
-  it('keeps a new list item inside its list', () => {
-    const { ed, blocks, save } = load(DOC);
-    const second = blocks().filter((b) => b.dataset.type === 'Itemize')[1];
-    const nb = mkBlock('Itemize', 'Third item');
-    second.after(nb);
-    void ed;
-    const out = save();
-    expect(out).toContain('\\item Second item\n\\item Third item\n\\begin{enumerate}');
-    expect(out.match(/\\begin\{itemize\}/g)).toHaveLength(1);
+  it('rewrites only a float whose caption changed, keeping its other lines', () => {
+    const read = readTex(DOC);
+    const blocks = children(read.doc);
+    const i = blocks.findIndex((b) => b.type === schema.nodes.float);
+    const float = blocks[i];
+    const inner: PMNode[] = [];
+    float.forEach((c) => inner.push(c));
+    const k = inner.findIndex((c) => c.attrs.layout === 'Caption');
+    inner[k] = inner[k].type.create(inner[k].attrs, schema.text('A better plot.'));
+    const out = writeTex(read, replaceChild(read.doc, i, float.type.create(float.attrs, inner)));
+    // Its other lines come back as written, indented as they were.
+    expect(out).toContain('\\begin{figure}[ht]\n  \\centering\n  \\includegraphics[width=0.5\\linewidth]{plot}\n  \\caption{A better plot.}\n\\end{figure}');
+    expect(out.slice(0, out.indexOf('\\begin{figure}'))).toBe(DOC.slice(0, DOC.indexOf('\\begin{figure}')));
   });
 
-  it('adds what new content needs to the preamble', () => {
-    const head = '\\documentclass{article}\n\\begin{document}\n';
-    const out = ensurePreamble(head, { theorems: { theorem: 'Theorem', definition: 'Definition' }, hyperref: true });
-    expect(out).toBe(
-      '\\documentclass{article}\n\\usepackage{hyperref}\n\\usepackage{amsthm}\n\\theoremstyle{plain}\n\\newtheorem{theorem}{Theorem}\n\\theoremstyle{definition}\n\\newtheorem{definition}[theorem]{Definition}\n\\theoremstyle{plain}\n\n\\begin{document}\n',
-    );
+  it('reads and writes notes, margin notes, graphics and alignment', () => {
+    const tex = '\\begin{document}\n% one\n% two\n\nText\\marginpar{side} and \\includegraphics[scale=2]{a.png}.\n\n\\begin{center}\nMiddle.\n\\end{center}\n\\end{document}\n';
+    const read = readTex(tex);
+    expect(writeTex(read, read.doc)).toBe(tex);
+    const blocks = children(read.doc);
+    expect(blocks.map((b) => b.type.name === 'paragraph' ? `p:${b.attrs.align ?? '-'}` : b.type.name)).toEqual(['note', 'p:-', 'p:center']);
+    // Edited, each is written back as LaTeX.
+    const note = schema.nodes.note.create(null, schema.text('first\n\nthird'));
+    const text = blocks[1].type.create(blocks[1].attrs, blocks[1].content.addToEnd(schema.text(' More.')));
+    const middle = blocks[2].type.create(blocks[2].attrs, schema.text('Centred.'));
+    const out = writeTex(read, schema.nodes.doc.create(null, [note, text, middle]));
+    expect(out).toBe('\\begin{document}\n% first\n%\n% third\n\nText\\marginpar{side} and \\includegraphics[scale=2]{a.png}. More.\n\n\\begin{center}\nCentred.\n\\end{center}\n\\end{document}\n');
   });
 
-  it('reads files without \\begin{document} (included chapters)', () => {
-    const text = '\\chapter{Methods}\n\nWe measure $x$.\n';
-    const { save, blocks } = load(text);
-    expect(blocks()[0].dataset.type).toBe('Chapter');
-    expect(save()).toBe(text);
+  it('rewrites only the paragraph that changed', () => {
+    const read = readTex(DOC);
+    const blocks = children(read.doc);
+    const i = blocks.findIndex((b) => b.textContent.startsWith('To be'));
+    const out = writeTex(read, replaceChild(read.doc, i, withText(blocks[i], 'Brevity is the soul of wit.')));
+    expect(out).toBe(DOC.replace('To be or not to be.', 'Brevity is the soul of wit.'));
   });
 
-  it('reads preamble macros and theorem names', () => {
-    expect(macrosOf('\\newcommand{\\R}{\\mathbb{R}}\n\\newcommand{\\norm}[1]{\\|#1\\|}\n\\DeclareMathOperator{\\tr}{tr}')).toEqual({
-      R: '\\mathbb{R}',
-      norm: { args: 1, def: '\\|#1\\|' },
-      tr: '\\operatorname{tr}',
-    });
-    expect(theoremsOf('\\newtheorem{hyp}{Hypothesis}').hyp).toBe('Hypothesis');
+  it('rewrites a changed list item, keeping the other items as written', () => {
+    const read = readTex(DOC);
+    const blocks = children(read.doc);
+    const i = blocks.findIndex((b) => b.textContent === 'First item');
+    const out = writeTex(read, replaceChild(read.doc, i, withText(blocks[i], 'Changed first')));
+    expect(out).toContain('\\begin{itemize}\n\\item Changed first\n\\item Second item with a nested list:');
+    expect(out).toContain('\\begin{enumerate}[label=(\\alph*)]\n    \\item Inner one\n    \\item Inner two\n  \\end{enumerate}');
+    expect(out).toContain('\\item[Custom] Labelled item\n\\end{itemize}');
+    // Everything outside the list is untouched.
+    expect(out.slice(0, out.indexOf('\\begin{itemize}'))).toBe(DOC.slice(0, DOC.indexOf('\\begin{itemize}')));
+    expect(out.slice(out.indexOf('\\begin{hyp}'))).toBe(DOC.slice(DOC.indexOf('\\begin{hyp}')));
   });
 
-  it('turns accents and quotes into characters', () => {
-    const { blocks } = load("Universit\\'e de ``Paris'' -- Orsay\n");
-    expect(blocks()[0].textContent).toBe('Université de \u201cParis\u201d -- Orsay');
-  });
-});
-
-describe('LyX-style editor: tables', () => {
-  const TABLE = String.raw`\begin{table}[h]
-\centering
-\begin{tabular}{|l|c|r|}
-\hline
-Name & \multicolumn{2}{c|}{Score} \\ \hline\hline
-Ann & $x^2$ & \textbf{9} \\[2pt]
-\cline{2-3}
-Bob & 1 & 2 \\
-\hline
-\end{tabular}
-\caption{Results}
-\end{table}
-`;
-  const tab = (ed: HTMLElement) => ed.querySelector<HTMLElement>('[data-inset="Tabular"]')!;
-  const cells = (ed: HTMLElement) => [...tab(ed).querySelectorAll('tr')].map((tr) => [...tr.cells].map((td) => td.textContent));
-
-  it('reads a tabular as a table inset and writes it back unchanged', () => {
-    const { ed, save } = load(TABLE);
-    expect(tab(ed).closest('[data-inset="Float"]')).not.toBeNull();
-    expect(cells(ed)).toEqual([['Name', 'Score'], ['Ann', 'x^2', '9'], ['Bob', '1', '2']]);
-    const [head, ann] = tab(ed).querySelectorAll('tr');
-    expect(head.cells[1].colSpan).toBe(2);
-    expect(ann.querySelector('math-field')).not.toBeNull();
-    expect(head.cells[0].style.borderTop).toContain('solid');
-    expect(head.cells[0].style.borderLeft).toContain('solid');
-    expect(ann.cells[0].style.textAlign).toBe('left');
-    expect(save()).toBe(TABLE);
+  it('keeps a new item in the list it was added to', () => {
+    const read = readTex(DOC);
+    const blocks = children(read.doc);
+    const i = blocks.findIndex((b) => b.textContent === 'Labelled item');
+    const item = schema.nodes.paragraph.create({ layout: 'Itemize', depth: 0 }, schema.text('Fourth'));
+    blocks.splice(i + 1, 0, item);
+    const out = writeTex(read, schema.nodes.doc.create(null, blocks));
+    expect(out).toContain('\\item[Custom] Labelled item\n\\item Fourth\n\\end{itemize}');
+    expect(out.match(/\\begin\{itemize\}/g)!.length).toBe(1);
   });
 
-  it('writes an edited table with its rules and multicolumns', () => {
-    const { ed, save } = load(TABLE);
-    tab(ed).querySelectorAll('tr')[2].cells[0].querySelector('.ibody')!.textContent = 'Bo & Co';
-    expect(save()).toContain(String.raw`\begin{tabular}{|l|c|r|}
-\hline
-Name & \multicolumn{2}{c|}{Score} \\
-\hline \hline
-Ann & $x^2$ & \textbf{9} \\[2pt]
-\cline{2-3}
-Bo \& Co & 1 & 2 \\
-\hline
-\end{tabular}`);
+  it('writes new content as clean LaTeX, escaping special characters', () => {
+    const read = readTex('\\begin{document}\nOld.\n\\end{document}\n');
+    const p = schema.nodes.paragraph.create({ layout: 'Section' }, [schema.text('Costs & 50% '), schema.text('more', [schema.marks.emph.create()])]);
+    const theorem = schema.nodes.paragraph.create({ layout: 'Theorem', startsEnv: true }, schema.text('True.'));
+    const formula = schema.nodes.math_display.create({ latex: 'x = 1', env: '\\[', label: 'eq:one' });
+    const out = writeTex(read, schema.nodes.doc.create(null, [p, theorem, formula]));
+    // A theorem the file did not define brings its \newtheorem (and amsthm) along.
+    expect(out).toBe('\\usepackage{amsthm}\n\\newtheorem{theorem}{Theorem}\n\\begin{document}\n\\section{Costs \\& 50\\% \\emph{more}}\n\\begin{theorem}\nTrue.\n\\end{theorem}\n\n\\begin{equation}\n\\label{eq:one}\nx = 1\n\\end{equation}\n\\end{document}\n');
   });
 
-  it('adds and deletes rows and columns', () => {
-    const { ed, save } = load('\\begin{tabular}{|c|c|}\n\\hline\na & b \\\\\n\\hline\n\\end{tabular}\n');
-    const t = tab(ed);
-    const a = t.querySelector('td')!;
-    tabularOp(t, a, 'append-row');
-    tabularOp(t, a, 'append-column');
-    expect(cells(ed)).toEqual([['a', '\u200B', 'b'], ['\u200B', '\u200B', '\u200B']]);
-    expect(t.dataset.spec).toBe('|c|c|c|');
-    tabularOp(t, t.querySelectorAll('tr')[1].cells[0], 'delete-row');
-    tabularOp(t, a, 'delete-column');
-    expect(cells(ed)).toEqual([['\u200B', 'b']]);
-    expect(save()).toBe('\\begin{tabular}{|c|c|}\n\\hline\n & b \\\\\n\\hline\n\\end{tabular}\n');
+  it('adds amsthm and \\newtheorem for a theorem layout the document does not define', () => {
+    const tex = '\\documentclass{article}\n\\usepackage{amsmath}\n\\begin{document}\nOld.\n\\end{document}\n';
+    const read = readTex(tex);
+    const lemma = schema.nodes.paragraph.create({ layout: 'Lemma' }, schema.text('True.'));
+    const proof = schema.nodes.paragraph.create({ layout: 'Proof' }, schema.text('Clear.'));
+    const out = writeTex(read, schema.nodes.doc.create(null, [lemma, proof]));
+    expect(out.startsWith('\\documentclass{article}\n\\usepackage{amsmath}\n\\usepackage{amsthm}\n\\newtheorem{lemma}{Lemma}\n\\begin{document}\n')).toBe(true);
+    // Already defined: nothing added.
+    const defined = readTex('\\usepackage{amsthm}\n\\newtheorem{lemma}{Lemma}\n\\begin{document}\nOld.\n\\end{document}\n');
+    expect(writeTex(defined, schema.nodes.doc.create(null, [lemma])).startsWith('\\usepackage{amsthm}\n\\newtheorem{lemma}{Lemma}\n\\begin{document}')).toBe(true);
   });
 
-  it('shows symbol commands as glyphs and keeps the float\'s \\centering', () => {
-    const src = '\\begin{table}[t]\n\\centering\n\\begin{tabular}{lc}\n\\toprule\nGR & \\checkmark \\\\\n\\bottomrule\n\\end{tabular}\n\\end{table}\n';
-    const { ed, save } = load(src);
-    expect(ed.querySelector('[data-inset="ERT"]')).toBeNull();
-    expect(cells(ed)).toEqual([['GR', '\u2713']]);
-    tab(ed).querySelector('td .ibody')!.textContent = 'General relativity';
-    expect(save()).toBe(src.replace('GR', 'General relativity'));
+  it('writes typographic quotes as LaTeX quotes', () => {
+    const read = readTex('\\begin{document}\nOld.\n\\end{document}\n');
+    const p = schema.nodes.paragraph.create(null, schema.text('\u201cHi\u201d, she said \u2018no\u2019.'));
+    expect(writeTex(read, schema.nodes.doc.create(null, [p]))).toBe("\\begin{document}\n``Hi'', she said `no'.\n\\end{document}\n");
   });
 
-  it('keeps tables it cannot read as TeX code', () => {
-    const { blocks, save } = load('\\begin{tabular}{cc\na & b\n');
-    expect(blocks()[0].querySelector('[data-inset="Tabular"]')).toBeNull();
-    expect(save()).toBe('\\begin{tabular}{cc\na & b\n');
-  });
-});
-
-describe('LyX-style editor: child documents', () => {
-  const SRC = '\\documentclass{report}\n\\begin{document}\nIntro.\n\n\\include{chapter/ch1}\n\n\\input{chapter/ch2}\n% \\input{chapter/old}\n\n\\input{a}\\input{b}\n\\end{document}\n';
-  const kids = (ed: HTMLElement) => [...ed.querySelectorAll<HTMLElement>('.blk[data-type="_include"]')].map((b) => `${b.dataset.variant} ${b.dataset.file}`);
-
-  it('reads \\input and \\include as child document blocks and writes them back unchanged', () => {
-    const { ed, save } = load(SRC);
-    expect(kids(ed)).toEqual(['include chapter/ch1', 'input chapter/ch2', 'input a', 'input b']);
-    expect(ed.querySelector('.blk[data-type="_include"]')!.textContent).toContain('chapter/ch1');
-    expect(save()).toBe(SRC);
+  it('keeps \\verb whole, so editing its paragraph cannot escape what is inside', () => {
+    const read = readTex('\\begin{document}\nUse \\verb|a_b{}| here.\n\\end{document}\n');
+    const p = children(read.doc)[0];
+    const edited = p.type.create(p.attrs, p.content.addToEnd(schema.text(' Done.')));
+    expect(writeTex(read, replaceChild(read.doc, 0, edited))).toBe('\\begin{document}\nUse \\verb|a_b{}| here. Done.\n\\end{document}\n');
   });
 
-  it('writes a new child document block as \\input', () => {
-    const { blocks, save } = load('\\documentclass{article}\n\\begin{document}\nText.\n\\end{document}\n');
-    blocks()[0].after(mkSpecial('_include', 'input', 'sections/intro'));
-    expect(save()).toContain('Text.\n\n\\input{sections/intro}\n');
-  });
-});
-
-describe('graphicsPaths', () => {
-  it('reads the \\graphicspath directories in order', () => {
-    expect(graphicsPaths('\\usepackage{graphicx}\n\\graphicspath{{figures/}{./img/}}\n')).toEqual(['figures/', './img/']);
-    expect(graphicsPaths('\\graphicspath{ {figs/} }')).toEqual(['figs/']);
-  });
-  it('ignores a commented-out \\graphicspath', () => {
-    expect(graphicsPaths('% \\graphicspath{{old/}}\n')).toEqual([]);
-    expect(graphicsPaths('no graphics here')).toEqual([]);
+  it('reads a file without \\begin{document} (an \\input chapter) as all body', () => {
+    const text = '\\chapter{One}\nText.\n';
+    const read = readTex(text);
+    expect(read.prefix).toBe('');
+    expect(children(read.doc)[0].attrs.layout).toBe('Chapter');
+    expect(writeTex(read, read.doc)).toBe(text);
   });
 });

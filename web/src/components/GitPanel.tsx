@@ -90,9 +90,10 @@ function ScmRow({ file, section, busy, sides }: { file: server.ScmFile; section:
       .catch((err: unknown) => toast({ kind: 'error', title: 'Could not load the diff', message: String(err) }));
   };
 
-  const act = (label: string, icon: React.ReactNode, run: () => void) => (
+  const act = (label: string, icon: React.ReactNode, run: () => void, danger = false) => (
     <IconButton
       size="sm"
+      danger={danger}
       label={label}
       disabled={busy}
       onClick={(e) => {
@@ -125,7 +126,7 @@ function ScmRow({ file, section, busy, sides }: { file: server.ScmFile; section:
             {act('Mark resolved (stage)', <Check className="size-3.5" />, () => void scmMarkResolved(file.path))}
           </>
         )}
-        {section === 'changes' && act('Discard changes', <Undo2 className="size-3.5" />, () => scmDiscard([file]))}
+        {section === 'changes' && act('Discard changes', <Undo2 className="size-3.5" />, () => scmDiscard([file]), true)}
         {section === 'changes' && act('Stage changes', <Plus className="size-3.5" />, () => void scmStage([file.path]))}
         {section === 'staged' && act('Unstage changes', <Minus className="size-3.5" />, () => void scmUnstage([file.path]))}
       </span>
@@ -360,13 +361,20 @@ export function GitPanel() {
             className="min-w-0 flex-1"
             icon={primary.icon}
             disabled={!!primary.disabled || !!busy}
-            loading={!!busy && busy !== 'checkout'}
+            loading={!!busy && busy !== 'checkout' && busy !== 'clean'}
             onClick={primary.onClick}
             title={primary.title}
           >
             {primary.label}
           </Button>
-          <Button size="sm" icon={<Eraser className="size-3.5" />} disabled={!!busy} onClick={() => void run('clean', cleanAuxFiles)} title="Delete build files (.aux, .log, …) so they are not committed">
+          <Button
+            size="sm"
+            icon={<Eraser className="size-3.5" />}
+            disabled={!!busy}
+            loading={busy === 'clean'}
+            onClick={() => void run('clean', cleanAuxFiles)}
+            title="Delete build files (.aux, .log, …) so they are not committed"
+          >
             Clean
           </Button>
         </div>
@@ -396,7 +404,7 @@ export function GitPanel() {
           busy={!!busy}
           actions={
             <>
-              <IconButton size="sm" label="Discard all changes" onClick={() => scmDiscard(st.changes)}>
+              <IconButton size="sm" danger label="Discard all changes" onClick={() => scmDiscard(st.changes)}>
                 <Undo2 className="size-3.5" />
               </IconButton>
               <IconButton size="sm" label="Stage all changes" onClick={() => void scmStage()}>

@@ -14,6 +14,8 @@ export interface ProjectMeta {
   template?: string;
   /** The folder is a Git repository. */
   hasGit?: boolean;
+  /** URL of the repository's remote (origin, else the first one); null for local-only repositories. */
+  remoteUrl?: string | null;
   openTabs?: string[];
   activePath?: string | null;
 }
@@ -43,16 +45,11 @@ export type ThemeMode = 'dark' | 'light' | 'system';
  */
 export type CompilerMode = 'auto' | 'browser' | 'local' | 'api';
 
-/**
- * How .tex files are edited: `default` is the LaTeX source in Monaco, `lyx` a
- * LyX-style WYSIWYM document (formulas, layouts and insets; raw LaTeX only in
- * red TeX-code boxes).
- */
-export type EditorStyle = 'default' | 'lyx';
+/** How .tex files are edited: the LaTeX source, or LyX-style (WYSIWYM) with the source written for you. */
+export type EditorStyle = 'source' | 'lyx';
 
 export interface Settings {
   theme: ThemeMode;
-  editorStyle: EditorStyle;
   compiler: CompilerMode;
   /** Write the PDF built in the browser into the project folder (as local builds do). */
   savePdf: boolean;
@@ -76,13 +73,19 @@ export interface Settings {
   /** Show formulas rendered in the editor; the cursor's lines keep the raw TeX. */
   concealTex: boolean;
   formatBar: boolean;
+  /** The LyX-style editor is available (the Source | LyX switch shows); off, .tex files always open as source. */
+  lyxEnabled: boolean;
+  editorStyle: EditorStyle;
+  /** The LyX-style editor's typing rules: $ starts a formula, " gives typographic quotes, extra spaces are ignored. */
+  lyxDollarMath: boolean;
+  lyxSmartQuotes: boolean;
+  lyxSpaceRules: boolean;
   engineUrl: string;
   shelfUrl: string;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
   theme: 'dark',
-  editorStyle: 'default',
   compiler: 'auto',
   savePdf: true,
   vim: false,
@@ -102,6 +105,11 @@ export const DEFAULT_SETTINGS: Settings = {
   mathPreview: true,
   concealTex: false,
   formatBar: true,
+  lyxEnabled: true,
+  editorStyle: 'source',
+  lyxDollarMath: true,
+  lyxSmartQuotes: true,
+  lyxSpaceRules: true,
   engineUrl: '',
   shelfUrl: '',
 };

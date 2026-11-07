@@ -27,22 +27,16 @@ from gitlatex.http import _json, with_project_lock
 from gitlatex.services import comments
 from gitlatex.services.git_backend import Repo
 from gitlatex.services.paths import resolve_repo_path
+from gitlatex.services.sync import BUILD_SUFFIXES
 
 bp = Blueprint("workspace", __name__)
-
-# What pdflatex (and BibTeX, makeindex, latexmk, beamer…) writes next to a
-# document. New projects ignore these in Git, and the file list hides them.
-BUILD_SUFFIXES = (
-    ".aux", ".log", ".out", ".toc", ".lof", ".lot", ".fls", ".fdb_latexmk",
-    ".synctex.gz", ".synctex", ".synctex(busy)", ".bbl", ".blg", ".bcf", ".run.xml",
-    ".idx", ".ind", ".ilg", ".nav", ".snm", ".vrb", ".xdv", ".dvi",
-)
 
 # Never shipped to the editor: Git internals, review comments (the review API
 # owns those) and build output, which the editor reads from the compile result.
 HIDDEN_NAMES = (".git", ".gitlatex")
 HIDDEN_SUFFIXES = BUILD_SUFFIXES
 
+# New projects keep build output out of Git.
 GITIGNORE = "# LaTeX build output\n" + "".join("*%s\n" % s for s in BUILD_SUFFIXES)
 
 # Files above this size are listed but not loaded, so one stray video cannot
@@ -153,7 +147,7 @@ def create_project():
                 f.write(body)
         gitignore = os.path.join(full, ".gitignore")
         if not os.path.exists(gitignore):
-            with open(gitignore, "w", encoding="utf-8") as f:
+            with open(gitignore, "w", encoding="utf-8", newline="\n") as f:
                 f.write(GITIGNORE)
         if data.get("git") and Repo is not None:
             Repo.init(full)
